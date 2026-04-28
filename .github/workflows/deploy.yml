@@ -44,8 +44,6 @@ jobs:
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           AGENT_GIT_SSH_KEY: ${{ secrets.AGENT_GIT_SSH_KEY }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
           REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
         run: |
           missing=""
@@ -57,8 +55,6 @@ jobs:
             NEXTAUTH_SECRET \
             AGENT_GITHUB_TOKEN \
             AGENT_GIT_SSH_KEY \
-            GHCR_USERNAME \
-            GHCR_READ_TOKEN \
             REDISINSIGHT_HTPASSWD
           do
             eval "value=\${$name}"
@@ -203,8 +199,6 @@ jobs:
             AGENT_CHANGED=$AGENT_CHANGED
             ML_INFER_CHANGED=$ML_INFER_CHANGED
             EOF
-
-            echo "${{ secrets.GHCR_READ_TOKEN }}" | docker login ghcr.io --username "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
             CHANGED_SERVICES=""
             [ "$APP_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES app"
