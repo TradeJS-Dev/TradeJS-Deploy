@@ -27,6 +27,9 @@ application code from source and it does not depend on npm package publishing.
 - `GHCR_READ_TOKEN`
 - `REDISINSIGHT_HTPASSWD`
 
+If `Copy deploy files to server` fails with `can't connect without a private SSH key or password`,
+`SSH_KEY` is missing or empty in the repository secrets.
+
 ## Optional Workflow Inputs
 
 Manual deploy supports overriding:
