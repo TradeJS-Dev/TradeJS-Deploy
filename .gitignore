@@ -1,0 +1,8 @@
+.env
+release.env
+certbot/conf
+certbot/www
+data
+screenshots
+tradejs-agent-repo
+agent-ssh

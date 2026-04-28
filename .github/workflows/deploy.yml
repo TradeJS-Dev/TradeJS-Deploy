@@ -1,0 +1,194 @@
+name: Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: true
+        default: latest
+        type: string
+      app_changed:
+        description: "Redeploy app"
+        required: true
+        default: true
+        type: boolean
+      agent_changed:
+        description: "Redeploy agent"
+        required: true
+        default: true
+        type: boolean
+      ml_infer_changed:
+        description: "Redeploy ml-infer"
+        required: true
+        default: true
+        type: boolean
+  repository_dispatch:
+    types:
+      - tradejs-images-published
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release inputs
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          INPUT_APP_CHANGED: ${{ inputs.app_changed }}
+          INPUT_AGENT_CHANGED: ${{ inputs.agent_changed }}
+          INPUT_ML_INFER_CHANGED: ${{ inputs.ml_infer_changed }}
+          PAYLOAD_IMAGE_TAG: ${{ github.event.client_payload.image_tag }}
+          PAYLOAD_APP_CHANGED: ${{ github.event.client_payload.app_changed }}
+          PAYLOAD_AGENT_CHANGED: ${{ github.event.client_payload.agent_changed }}
+          PAYLOAD_ML_INFER_CHANGED: ${{ github.event.client_payload.ml_infer_changed }}
+        run: |
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            echo "image_tag=${PAYLOAD_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "app_changed=${PAYLOAD_APP_CHANGED}" >> "$GITHUB_OUTPUT"
+            echo "agent_changed=${PAYLOAD_AGENT_CHANGED}" >> "$GITHUB_OUTPUT"
+            echo "ml_infer_changed=${PAYLOAD_ML_INFER_CHANGED}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_tag=${INPUT_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "app_changed=${INPUT_APP_CHANGED}" >> "$GITHUB_OUTPUT"
+            echo "agent_changed=${INPUT_AGENT_CHANGED}" >> "$GITHUB_OUTPUT"
+            echo "ml_infer_changed=${INPUT_ML_INFER_CHANGED}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create app env
+        run: |
+          cat > .env <<EOF
+          PORT=3000
+          NODE_ENV=production
+          APP_URL=https://app.tradejs.dev
+          NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+          NEXTAUTH_URL=https://app.tradejs.dev
+          PUPPETEER_SKIP_DOWNLOAD=true
+          PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+          REDIS_HOST=redis
+          REDIS_PORT=6379
+          ML_GRPC_ADDRESS=ml-infer:50051
+          PG_HOST=timescale
+          PG_PORT=5432
+          PG_USER=app
+          PG_PASSWORD=app
+          PG_DATABASE=app
+          AGENT_GITHUB_REPOSITORY=TradeJS-Dev/TradeJS
+          AGENT_GITHUB_BASE_BRANCH=stable
+          AGENT_GITHUB_TOKEN=${{ secrets.AGENT_GITHUB_TOKEN }}
+          DERIVATIVES_CONTEXT_ENABLED=true
+          DERIVATIVES_CONTEXT_INTERVALS=15m,1h
+          DERIVATIVES_CONTEXT_LOOKBACK_HOURS=48
+          EOF
+
+      - name: Create release update env
+        run: |
+          cat > release-update.env <<EOF
+          DEPLOY_IMAGE_TAG=${{ steps.release.outputs.image_tag }}
+          APP_CHANGED=${{ steps.release.outputs.app_changed }}
+          AGENT_CHANGED=${{ steps.release.outputs.agent_changed }}
+          ML_INFER_CHANGED=${{ steps.release.outputs.ml_infer_changed }}
+          EOF
+
+      - name: Create nginx htpasswd
+        run: |
+          printf "%s\n" "${{ secrets.REDISINSIGHT_HTPASSWD }}" > nginx/.htpasswd
+
+      - name: Copy deploy files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: ".env,release-update.env,docker-compose.prod.yml,nginx,sql,certbot,init-cert.sh"
+          target: ~/
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/
+            mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh
+            chmod +x ./init-cert.sh
+
+            cat > agent-ssh/id_ed25519 <<'EOF'
+            ${{ secrets.AGENT_GIT_SSH_KEY }}
+            EOF
+            chmod 700 agent-ssh
+            chmod 600 agent-ssh/id_ed25519
+            ssh-keyscan github.com > agent-ssh/known_hosts
+            chmod 644 agent-ssh/known_hosts
+
+            if [ ! -d tradejs-agent-repo/.git ]; then
+              GIT_SSH_COMMAND="ssh -i ~/agent-ssh/id_ed25519 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/agent-ssh/known_hosts" \
+                git clone git@github.com:TradeJS-Dev/TradeJS.git ~/tradejs-agent-repo
+            else
+              GIT_SSH_COMMAND="ssh -i ~/agent-ssh/id_ed25519 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/agent-ssh/known_hosts" \
+                git -C ~/tradejs-agent-repo fetch origin stable
+              git -C ~/tradejs-agent-repo checkout stable
+              git -C ~/tradejs-agent-repo reset --hard origin/stable
+            fi
+
+            export $(grep -v '^#' .env | xargs)
+            export $(grep -v '^#' release-update.env | xargs)
+
+            if [ -f release.env ]; then
+              export $(grep -v '^#' release.env | xargs)
+            else
+              APP_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
+              AGENT_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
+              ML_INFER_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
+            fi
+
+            if [ "$APP_CHANGED" = "true" ]; then
+              APP_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
+            fi
+            if [ "$AGENT_CHANGED" = "true" ]; then
+              AGENT_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
+            fi
+            if [ "$ML_INFER_CHANGED" = "true" ]; then
+              ML_INFER_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
+            fi
+
+            cat > release.env <<EOF
+            APP_IMAGE_TAG=$APP_IMAGE_TAG
+            AGENT_IMAGE_TAG=$AGENT_IMAGE_TAG
+            ML_INFER_IMAGE_TAG=$ML_INFER_IMAGE_TAG
+            APP_CHANGED=$APP_CHANGED
+            AGENT_CHANGED=$AGENT_CHANGED
+            ML_INFER_CHANGED=$ML_INFER_CHANGED
+            EOF
+
+            echo "${{ secrets.GHCR_READ_TOKEN }}" | docker login ghcr.io --username "${{ secrets.GHCR_USERNAME }}" --password-stdin
+
+            CHANGED_SERVICES=""
+            [ "$APP_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES app"
+            [ "$AGENT_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES agent"
+            [ "$ML_INFER_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES ml-infer"
+
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull site docs
+            if [ -n "$CHANGED_SERVICES" ]; then
+              docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull $CHANGED_SERVICES
+            fi
+
+            systemctl stop nginx || true
+            systemctl disable nginx || true
+
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis certbot certbot-cron
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d site docs
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d nginx
+
+            if [ -n "$CHANGED_SERVICES" ]; then
+              docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d $CHANGED_SERVICES
+            fi
+
+            docker restart nginx
