@@ -160,15 +160,16 @@ jobs:
             ssh-keyscan github.com > agent-ssh/known_hosts
             chmod 644 agent-ssh/known_hosts
 
-            if [ ! -d tradejs-agent-repo/.git ]; then
-              GIT_SSH_COMMAND="ssh -i ~/agent-ssh/id_ed25519 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/agent-ssh/known_hosts" \
-                git clone git@github.com:TradeJS-Dev/TradeJS.git ~/tradejs-agent-repo
-            else
-              GIT_SSH_COMMAND="ssh -i ~/agent-ssh/id_ed25519 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/agent-ssh/known_hosts" \
-                git -C ~/tradejs-agent-repo fetch origin stable
-              git -C ~/tradejs-agent-repo checkout stable
-              git -C ~/tradejs-agent-repo reset --hard origin/stable
+            GIT_SSH_COMMAND="ssh -i ~/agent-ssh/id_ed25519 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/agent-ssh/known_hosts"
+
+            if ! GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git -C ~/tradejs-agent-repo rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+              rm -rf ~/tradejs-agent-repo
+              GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git clone git@github.com:TradeJS-Dev/TradeJS.git ~/tradejs-agent-repo
             fi
+
+            GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git -C ~/tradejs-agent-repo fetch origin stable
+            git -C ~/tradejs-agent-repo checkout stable
+            git -C ~/tradejs-agent-repo reset --hard origin/stable
 
             export $(grep -v '^#' .env | xargs)
             export $(grep -v '^#' release-update.env | xargs)
@@ -209,9 +210,6 @@ jobs:
             if [ -n "$CHANGED_SERVICES" ]; then
               docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull $CHANGED_SERVICES
             fi
-
-            systemctl stop nginx || true
-            systemctl disable nginx || true
 
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis certbot certbot-cron
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d site docs
