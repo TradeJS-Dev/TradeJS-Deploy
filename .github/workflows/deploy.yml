@@ -40,6 +40,7 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
           GIT_SSH_PRIVATE_KEY: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
@@ -50,6 +51,7 @@ jobs:
           for name in \
             SSH_HOST \
             SSH_USER \
+            SSH_KEY \
             GIT_SSH_PRIVATE_KEY \
             NEXTAUTH_SECRET \
             AGENT_GITHUB_TOKEN \
@@ -135,7 +137,7 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
+          key: ${{ secrets.SSH_KEY }}
           source: ".env,release-update.env,docker-compose.prod.yml,nginx,sql,certbot,init-cert.sh"
           target: ~/
 
@@ -144,7 +146,7 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
+          key: ${{ secrets.SSH_KEY }}
           script: |
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh
