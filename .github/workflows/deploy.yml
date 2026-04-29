@@ -40,10 +40,9 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_KEY: ${{ secrets.SSH_KEY }}
+          GIT_SSH_PRIVATE_KEY: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
-          AGENT_GIT_SSH_KEY: ${{ secrets.AGENT_GIT_SSH_KEY }}
           REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
         run: |
           missing=""
@@ -51,10 +50,9 @@ jobs:
           for name in \
             SSH_HOST \
             SSH_USER \
-            SSH_KEY \
+            GIT_SSH_PRIVATE_KEY \
             NEXTAUTH_SECRET \
             AGENT_GITHUB_TOKEN \
-            AGENT_GIT_SSH_KEY \
             REDISINSIGHT_HTPASSWD
           do
             eval "value=\${$name}"
@@ -137,7 +135,7 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
           source: ".env,release-update.env,docker-compose.prod.yml,nginx,sql,certbot,init-cert.sh"
           target: ~/
 
@@ -146,14 +144,14 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
           script: |
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh
             chmod +x ./init-cert.sh
 
             cat > agent-ssh/id_ed25519 <<'EOF'
-            ${{ secrets.AGENT_GIT_SSH_KEY }}
+            ${{ secrets.GIT_SSH_PRIVATE_KEY }}
             EOF
             chmod 700 agent-ssh
             chmod 600 agent-ssh/id_ed25519

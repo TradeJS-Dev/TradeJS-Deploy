@@ -19,14 +19,13 @@ application code from source and it does not depend on npm package publishing.
 
 - `SSH_HOST`
 - `SSH_USER`
-- `SSH_KEY`
+- `GIT_SSH_PRIVATE_KEY`
 - `NEXTAUTH_SECRET`
 - `AGENT_GITHUB_TOKEN`
-- `AGENT_GIT_SSH_KEY`
 - `REDISINSIGHT_HTPASSWD`
 
 If `Copy deploy files to server` fails with `can't connect without a private SSH key or password`,
-`SSH_KEY` is missing or empty in the repository secrets.
+`GIT_SSH_PRIVATE_KEY` is missing or empty in the repository secrets.
 
 ## Optional Workflow Inputs
 
