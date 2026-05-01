@@ -130,8 +130,10 @@ jobs:
           EOF
 
       - name: Create nginx htpasswd
+        env:
+          REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
         run: |
-          printf "%s\n" "${{ secrets.REDISINSIGHT_HTPASSWD }}" > nginx/.htpasswd
+          printf '%s\n' "$REDISINSIGHT_HTPASSWD" > nginx/.htpasswd
 
       - name: Copy deploy files to server
         uses: appleboy/scp-action@v0.1.7
