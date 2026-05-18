@@ -106,7 +106,7 @@ jobs:
           BACKTEST_PARENT_HEAP_MB=2048
           BACKTEST_WORKER_HEAP_MB=1024
           BACKTEST_MAX_PARALLEL=1
-          KLINE_CONCURRENCY_LIMIT=1
+          KLINE_CONCURRENCY_LIMIT=4
           NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
           NEXTAUTH_URL=https://app.tradejs.dev
           PUPPETEER_SKIP_DOWNLOAD=true
