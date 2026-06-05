@@ -157,7 +157,6 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          command_timeout: 30m
           script: |
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh
