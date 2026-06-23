@@ -126,6 +126,7 @@ jobs:
           DERIVATIVES_CONTEXT_ENABLED=true
           DERIVATIVES_CONTEXT_INTERVALS=15m,1h
           DERIVATIVES_CONTEXT_LOOKBACK_HOURS=48
+          DERIVATIVES_CONTEXT_TARGET_ENABLED=true
           EOF
 
       - name: Create release update env
