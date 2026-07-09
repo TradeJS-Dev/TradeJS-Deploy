@@ -164,6 +164,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          command_timeout: 30m
           script: |
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh
@@ -223,14 +224,12 @@ jobs:
             [ "$AGENT_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES agent"
             [ "$ML_INFER_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES ml-infer"
 
-            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull site docs
             if [ -n "$CHANGED_SERVICES" ]; then
               docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull $CHANGED_SERVICES
             fi
 
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis certbot certbot-cron
-            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d site docs
-            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d nginx
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d --no-deps nginx
 
             if [ -n "$CHANGED_SERVICES" ]; then
               docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d $CHANGED_SERVICES

@@ -14,6 +14,9 @@ application code from source and it does not depend on npm package publishing.
 - `TradeJS-Deploy` receives the image tag through `repository_dispatch` or
   `workflow_dispatch`.
 - The server pulls only tagged images and runs `docker compose`.
+- `tradejs.dev` and `docs.tradejs.dev` are published by the separate
+  `TradeJS-Site` and `TradeJS-Docs` workflows; this deployment does not pull or
+  restart their containers.
 
 ## Required Secrets
 
