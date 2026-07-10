@@ -166,6 +166,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 30m
           script: |
+            set -e
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh
             chmod +x ./init-cert.sh
@@ -190,11 +191,12 @@ jobs:
             git -C ~/tradejs-agent-repo reset --hard origin/stable
 
             export $(grep -v '^#' .env | xargs)
-            export $(grep -v '^#' release-update.env | xargs)
-
             if [ -f release.env ]; then
               export $(grep -v '^#' release.env | xargs)
-            else
+            fi
+            export $(grep -v '^#' release-update.env | xargs)
+
+            if [ ! -f release.env ]; then
               APP_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
               AGENT_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
               ML_INFER_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
