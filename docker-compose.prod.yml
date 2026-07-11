@@ -12,6 +12,7 @@ services:
     image: ghcr.io/tradejs-dev/tradejs-app:${APP_IMAGE_TAG}
     expose:
       - "3000"
+      - "3001"
     env_file:
       - .env
       - release.env
@@ -21,6 +22,16 @@ services:
       - ./.env:/app/.env:ro
     networks:
       - web
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:3000 >/dev/null && curl -fsS http://127.0.0.1:3001/health >/dev/null",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     logging:
       driver: json-file
       options:
