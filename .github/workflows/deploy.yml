@@ -249,7 +249,7 @@ jobs:
               docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull $CHANGED_SERVICES
             fi
 
-            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis certbot certbot-cron
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis site docs certbot certbot-cron
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d --no-deps nginx
 
             if [ -n "$CHANGED_SERVICES" ]; then
