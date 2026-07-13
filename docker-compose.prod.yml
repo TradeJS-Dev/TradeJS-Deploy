@@ -2,6 +2,7 @@ services:
   app:
     container_name: app
     restart: always
+    mem_limit: ${APP_MEMORY_LIMIT:-5g}
     depends_on:
       redis:
         condition: service_healthy
@@ -41,6 +42,7 @@ services:
   agent:
     container_name: agent
     restart: always
+    mem_limit: ${AGENT_MEMORY_LIMIT:-4g}
     depends_on:
       redis:
         condition: service_healthy
@@ -69,6 +71,7 @@ services:
   site:
     container_name: site
     restart: always
+    mem_limit: ${SITE_MEMORY_LIMIT:-512m}
     image: ghcr.io/tradejs-dev/tradejs-site:latest
     expose:
       - "3003"
@@ -84,6 +87,7 @@ services:
     container_name: docs
     image: ghcr.io/tradejs-dev/tradejs-docs:latest
     restart: unless-stopped
+    mem_limit: ${DOCS_MEMORY_LIMIT:-256m}
     expose:
       - "80"
     networks:
@@ -97,6 +101,7 @@ services:
   timescale:
     container_name: inv-timescale
     image: timescale/timescaledb:latest-pg16
+    mem_limit: ${TIMESCALE_MEMORY_LIMIT:-4g}
     environment:
       - POSTGRES_USER=app
       - POSTGRES_PASSWORD=app
@@ -117,6 +122,7 @@ services:
     image: redis/redis-stack:latest
     container_name: inv-redis
     restart: unless-stopped
+    mem_limit: ${REDIS_MEMORY_LIMIT:-4g}
     expose:
       - "8001"
     volumes:
@@ -133,6 +139,7 @@ services:
     container_name: ml-infer
     image: ghcr.io/tradejs-dev/tradejs-ml-infer:${ML_INFER_IMAGE_TAG}
     restart: unless-stopped
+    mem_limit: ${ML_INFER_MEMORY_LIMIT:-1g}
     environment:
       MODEL_DIR: /app/data/ml/models
       DEFAULT_STRATEGY: TrendLine
@@ -149,6 +156,7 @@ services:
     image: nginx:stable-alpine
     container_name: nginx
     restart: always
+    mem_limit: ${NGINX_MEMORY_LIMIT:-256m}
     volumes:
       - ./nginx/nginx.conf.ssl:/etc/nginx/nginx.conf.ssl:ro
       - ./nginx/nginx.conf.nossl:/etc/nginx/nginx.conf.nossl:ro
@@ -180,6 +188,7 @@ services:
   certbot:
     image: certbot/certbot
     container_name: certbot
+    mem_limit: ${CERTBOT_MEMORY_LIMIT:-256m}
     volumes:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
@@ -195,6 +204,7 @@ services:
     image: certbot/certbot
     container_name: certbot-cron
     restart: on-failure
+    mem_limit: ${CERTBOT_MEMORY_LIMIT:-256m}
     depends_on:
       - certbot
     volumes:

@@ -99,7 +99,22 @@ jobs:
           PORT=3000
           NODE_ENV=production
           APP_URL=https://app.tradejs.dev
-          RUNTIME_SIGNAL_RETENTION_DAYS=14
+          RUNTIME_SIGNAL_RETENTION_DAYS=3
+          SIGNALS_DAEMON_HEAP_MB=2048
+          SERVER_HEALTH_HEAP_MB=256
+          SIGNALS_SUMMARY_HEAP_MB=1024
+          RUNTIME_PARITY_HEAP_MB=3072
+          DERIVATIVES_INGEST_HEAP_MB=1536
+          CONTINUITY_HEAP_MB=1536
+          APP_MEMORY_LIMIT=5g
+          AGENT_MEMORY_LIMIT=4g
+          SITE_MEMORY_LIMIT=512m
+          DOCS_MEMORY_LIMIT=256m
+          TIMESCALE_MEMORY_LIMIT=4g
+          REDIS_MEMORY_LIMIT=4g
+          ML_INFER_MEMORY_LIMIT=1g
+          NGINX_MEMORY_LIMIT=256m
+          CERTBOT_MEMORY_LIMIT=256m
           RESEARCH_AUTO_PARENT_HEAP_MB=1024
           RESEARCH_AUTO_BACKTEST_PARENT_HEAP_MB=2048
           RESEARCH_AUTO_AI_TRAIN_PARENT_HEAP_MB=2048
@@ -158,7 +173,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: ".env,release-update.env,docker-compose.prod.yml,nginx,sql,certbot,init-cert.sh"
+          source: ".env,release-update.env,docker-compose.prod.yml,nginx,sql,certbot,init-cert.sh,ensure-swap.sh"
           target: ~/
 
       - name: Deploy on server
@@ -172,7 +187,8 @@ jobs:
             set -e
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh
-            chmod +x ./init-cert.sh
+            chmod +x ./init-cert.sh ./ensure-swap.sh
+            ./ensure-swap.sh
 
             cat > agent-ssh/id_ed25519 <<'EOF'
             ${{ secrets.GIT_SSH_PRIVATE_KEY }}

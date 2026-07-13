@@ -16,6 +16,7 @@ application code from source and it does not depend on npm package publishing.
 - The server pulls only tagged images and runs `docker compose`.
 - The app image supervises Next.js, the signals daemon, and the market WebSocket gateway. The compose healthcheck requires both ports `3000` and `3001` to be healthy, while Nginx proxies `/ws/market` to the gateway with WebSocket upgrade headers.
 - Deploy waits for the updated app container to become healthy, prints its logs and fails on timeout/unhealthy status, then validates the running Nginx configuration with `nginx -t`.
+- Deployment ensures a persistent 4 GB `/swapfile`, caps the main service containers through Compose memory limits, and keeps runtime signals for three days by default.
 - `tradejs.dev` and `docs.tradejs.dev` are published by the separate
   `TradeJS-Site` and `TradeJS-Docs` workflows; this deployment does not pull or
   restart their containers.
