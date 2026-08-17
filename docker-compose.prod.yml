@@ -104,7 +104,7 @@ services:
     mem_limit: ${TIMESCALE_MEMORY_LIMIT:-4g}
     environment:
       - POSTGRES_USER=app
-      - POSTGRES_PASSWORD=app
+      - POSTGRES_PASSWORD=${PG_PASSWORD:?PG_PASSWORD is required}
       - POSTGRES_DB=app
     volumes:
       - pgdata:/var/lib/postgresql/data

@@ -48,6 +48,7 @@ jobs:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           GIT_SSH_PRIVATE_KEY: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
         run: |
@@ -59,6 +60,7 @@ jobs:
             SSH_KEY \
             GIT_SSH_PRIVATE_KEY \
             NEXTAUTH_SECRET \
+            PG_PASSWORD \
             AGENT_GITHUB_TOKEN \
             REDISINSIGHT_HTPASSWD
           do
@@ -115,6 +117,7 @@ jobs:
           cat >> .env <<EOF
           AUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
           NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+          PG_PASSWORD=${{ secrets.PG_PASSWORD }}
           APP_MEMORY_LIMIT=5g
           AGENT_MEMORY_LIMIT=4g
           SITE_MEMORY_LIMIT=512m
@@ -128,8 +131,8 @@ jobs:
           RESEARCH_AUTO_BACKTEST_PARENT_HEAP_MB=2048
           RESEARCH_AUTO_AI_TRAIN_PARENT_HEAP_MB=2048
           RESEARCH_AUTO_AGENT_PARENT_HEAP_MB=1536
-          AGENT_GITHUB_REPOSITORY=TradeJS-Dev/TradeJS
-          AGENT_GITHUB_BASE_BRANCH=stable
+          AGENT_GITHUB_ORGANIZATION=TradeJS-Dev
+          AGENT_GITHUB_BASE_BRANCH=main
           AGENT_GITHUB_TOKEN=${{ secrets.AGENT_GITHUB_TOKEN }}
           EOF
 
@@ -233,6 +236,26 @@ jobs:
             fi
 
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis site docs certbot certbot-cron
+
+            timescale_ready=false
+            for attempt in $(seq 1 30); do
+              if docker exec inv-timescale pg_isready -U app -d app >/dev/null 2>&1; then
+                timescale_ready=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$timescale_ready" != "true" ]; then
+              docker logs --tail 200 inv-timescale
+              echo "Timescale did not become ready" >&2
+              exit 1
+            fi
+
+            escaped_pg_password="$(printf '%s' "$PG_PASSWORD" | sed "s/'/''/g")"
+            printf "ALTER ROLE app WITH PASSWORD '%s';\n" "$escaped_pg_password" |
+              docker exec -i inv-timescale psql -v ON_ERROR_STOP=1 -U app -d app
+            unset escaped_pg_password
+
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d --no-deps nginx
 
             if [ -n "$CHANGED_SERVICES" ]; then

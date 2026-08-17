@@ -14,11 +14,13 @@ persistent volumes, infrastructure containers, and server-only secrets.
 - Deploy the app image published by `TradeJS-Project`, pinned by image tag.
 - Fetch `deploy/runtime.env` from the exact dispatched Project SHA.
 - Inject application credentials and server secrets here; never commit values.
+- Require `PG_PASSWORD` and keep the persistent Timescale `app` role aligned
+  with it before starting the application container.
 - Keep personal package composition, runtime app Dockerfile, cron, and
   `tradejs.config.ts` in `TradeJS-Project`.
 - Keep engine package publishing and ML inference implementation in `TradeJS`.
-- Keep the research agent on the TradeJS image until its monorepo source-path
-  assumptions are refactored deliberately.
+- Keep the research-agent image in `TradeJS`, but route strategy edits and pull
+  requests to the standalone strategy repositories on their `main` branches.
 
 ## Verification
 

@@ -33,6 +33,23 @@ assert(
   'Runtime auth secret is not injected by Deploy',
 );
 assert(
+  workflow.includes('PG_PASSWORD=${{ secrets.PG_PASSWORD }}'),
+  'Timescale password is not injected by Deploy',
+);
+assert(
+  workflow.includes('ALTER ROLE app WITH PASSWORD'),
+  'Existing Timescale roles are not synchronized with PG_PASSWORD',
+);
+assert(
+  workflow.includes('AGENT_GITHUB_ORGANIZATION=TradeJS-Dev') &&
+    workflow.includes('AGENT_GITHUB_BASE_BRANCH=main'),
+  'Research agent is not routed to standalone strategy repositories',
+);
+assert(
+  !workflow.includes('AGENT_GITHUB_REPOSITORY=TradeJS-Dev/TradeJS'),
+  'Research agent still targets the engine repository',
+);
+assert(
   workflow.includes('AGENT_IMAGE_TAG=latest') &&
     workflow.includes('ML_INFER_IMAGE_TAG=latest'),
   'Initial Project deploy must not reuse the app SHA for engine images',
@@ -48,6 +65,14 @@ assert(
 assert(
   compose.includes('ghcr.io/tradejs-dev/tradejs-agent:${AGENT_IMAGE_TAG}'),
   'Research agent image ownership changed accidentally',
+);
+assert(
+  compose.includes('POSTGRES_PASSWORD=${PG_PASSWORD:?PG_PASSWORD is required}'),
+  'Compose does not require the Deploy-owned Timescale password',
+);
+assert(
+  !compose.includes('POSTGRES_PASSWORD=app'),
+  'Compose still contains the legacy Timescale password',
 );
 
 console.log('Validated TradeJS-Project to TradeJS-Deploy handoff.');

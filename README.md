@@ -30,11 +30,24 @@ from source and it does not depend directly on npm package publishing.
 - `SSH_KEY`
 - `GIT_SSH_PRIVATE_KEY`
 - `NEXTAUTH_SECRET`
+- `PG_PASSWORD`
 - `AGENT_GITHUB_TOKEN`
 - `REDISINSIGHT_HTPASSWD`
 
 If `Copy deploy files to server` fails with `can't connect without a private SSH key or password`,
 `SSH_KEY` is missing, empty, or does not match the server user.
+
+`PG_PASSWORD` is the application database credential. It is injected into both
+the app environment and Timescale; every rollout also updates the existing
+`app` role, so a persistent database volume does not retain the old checked-in
+password. Generate it as a URL-safe value without whitespace or line breaks
+(for example, `openssl rand -hex 32`) because it is transported through a
+Compose env file.
+
+The research-agent SSH key must belong to a machine user that can read
+`TradeJS` and write every `TradeJS-Strategy-*` repository. Its GitHub token
+needs contents and pull-request read/write access to the same strategy set.
+TrendLine and ReverseTrendLine both target `TradeJS-Strategy-TrendLine`.
 
 ## Optional Workflow Inputs
 
