@@ -2,6 +2,11 @@
   "name": "tradejs-deploy",
   "version": "0.0.0",
   "private": true,
+  "keywords": [
+    "ai",
+    "claude",
+    "codex"
+  ],
   "packageManager": "yarn@4.13.0",
   "engines": {
     "node": "24.x"

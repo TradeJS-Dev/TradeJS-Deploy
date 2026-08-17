@@ -65,3 +65,5 @@ Manual deploy supports overriding:
 - Non-secret app values come from `TradeJS-Project/deploy/runtime.env`.
 - `release.env` is persisted on the server as the current deployed image state.
 - `release-update.env` is generated in CI and only carries the incoming deploy delta.
+
+Keywords: ai, claude, codex.
