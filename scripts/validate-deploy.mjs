@@ -29,12 +29,20 @@ assert(
   'Runtime env is not sourced from TradeJS-Project',
 );
 assert(
-  workflow.includes('AUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}'),
+  workflow.includes('DEPLOY_NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}') &&
+    workflow.includes("printf 'AUTH_SECRET=%s\\n'"),
   'Runtime auth secret is not injected by Deploy',
 );
 assert(
-  workflow.includes('PG_PASSWORD=${{ secrets.PG_PASSWORD }}'),
+  workflow.includes('DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}') &&
+    workflow.includes("printf 'PG_PASSWORD=%s\\n'"),
   'Timescale password is not injected by Deploy',
+);
+assert(
+  !workflow.includes('AUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}') &&
+    !workflow.includes('PG_PASSWORD=${{ secrets.PG_PASSWORD }}') &&
+    !workflow.includes('AGENT_GITHUB_TOKEN=${{ secrets.AGENT_GITHUB_TOKEN }}'),
+  'Runtime secrets are interpolated directly into the shell program',
 );
 assert(
   workflow.includes('ALTER ROLE app WITH PASSWORD'),
