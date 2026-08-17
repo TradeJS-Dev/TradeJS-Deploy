@@ -1,0 +1,27 @@
+# AGENTS.md
+
+## Scope
+
+These rules apply to the complete `TradeJS-Deploy` repository.
+
+## Purpose
+
+This repository owns server orchestration: SSH deployment, Compose, TLS,
+persistent volumes, infrastructure containers, and server-only secrets.
+
+## Boundaries
+
+- Deploy the app image published by `TradeJS-Project`, pinned by image tag.
+- Fetch `deploy/runtime.env` from the exact dispatched Project SHA.
+- Inject application credentials and server secrets here; never commit values.
+- Keep personal package composition, runtime app Dockerfile, cron, and
+  `tradejs.config.ts` in `TradeJS-Project`.
+- Keep engine package publishing and ML inference implementation in `TradeJS`.
+- Keep the research agent on the TradeJS image until its monorepo source-path
+  assumptions are refactored deliberately.
+
+## Verification
+
+Run `yarn checks` before every commit. For Compose changes, also run
+`docker compose -f docker-compose.prod.yml config` with a secret-free local env
+when practical.

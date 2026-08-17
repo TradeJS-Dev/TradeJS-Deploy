@@ -6,3 +6,5 @@ data
 screenshots
 tradejs-agent-repo
 agent-ssh
+node_modules
+.yarn/install-state.gz

@@ -10,7 +10,7 @@ services:
         condition: service_healthy
       ml-infer:
         condition: service_started
-    image: ghcr.io/tradejs-dev/tradejs-app:${APP_IMAGE_TAG}
+    image: ghcr.io/tradejs-dev/tradejs-project-app:${APP_IMAGE_TAG}
     expose:
       - "3000"
       - "3001"
