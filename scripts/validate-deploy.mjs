@@ -10,6 +10,7 @@ const backupWorkflow = read('.github/workflows/redis-backup.yml');
 const runtimeConfigWorkflow = read('.github/workflows/runtime-config.yml');
 const compose = read('docker-compose.prod.yml');
 const redisBackup = read('scripts/redis-backup.sh');
+const appRollback = read('scripts/rollback-app.sh');
 const packageJson = JSON.parse(read('package.json'));
 
 assert(
@@ -104,7 +105,10 @@ assert(
   workflow.includes('runtime-package-manifest.json') &&
     workflow.includes('compare-runtime-manifests.mjs') &&
     workflow.includes('release.env.previous') &&
-    workflow.includes('rollback_app'),
+    workflow.includes('rollback_app') &&
+    workflow.includes('./scripts/rollback-app.sh') &&
+    appRollback.includes('APP_IMAGE_TAG="$rollback_app_image_tag"') &&
+    appRollback.includes('--force-recreate app'),
   'Image manifest comparison or app rollback is missing',
 );
 assert(

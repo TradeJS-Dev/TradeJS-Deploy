@@ -203,7 +203,7 @@ jobs:
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh releases scripts
             chmod +x ./init-cert.sh ./ensure-swap.sh \
-              ./scripts/redis-backup.sh
+              ./scripts/redis-backup.sh ./scripts/rollback-app.sh
             ./ensure-swap.sh
 
             if ! grep -q '^PG_PASSWORD=.' .env; then
@@ -378,7 +378,7 @@ jobs:
               rollback_app() {
                 if [ "$had_previous_release" = "true" ] && [ -f release.env.previous ]; then
                   cp release.env.previous release.env
-                  docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d app
+                  ./scripts/rollback-app.sh
                 fi
                 exit 1
               }

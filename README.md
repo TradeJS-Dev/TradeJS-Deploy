@@ -91,6 +91,9 @@ directory accessible inside the container. Every isolated Redis process
 explicitly uses `/data/dump.rdb`; the Redis Stack executable's standalone
 default directory is not used. Restore readiness waits up to five minutes for
 large snapshots.
+If an incoming app is unhealthy, rollback reads the previous full-SHA image tag
+from the restored `release.env`, overrides any incoming tag still exported by
+the deploy shell, and force-recreates the app container.
 `provision` is the one-time operation for an absent deployment. It accepts a
 secret-free base64 JSON config, publishes release version 1, creates the
 deployment, and leaves new entries paused. Account credentials are never
