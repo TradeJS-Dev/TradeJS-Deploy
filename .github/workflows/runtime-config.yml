@@ -12,6 +12,7 @@ on:
           - verify
           - audit
           - audit-backups
+          - audit-storage
           - migrate
           - pause
           - resume
@@ -180,6 +181,70 @@ jobs:
                       done
                   done
                   cleanup_backup_audit
+                done
+                exit 0
+                ;;
+              audit-storage)
+                current_volume="$(
+                  docker inspect --format='{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' inv-redis
+                )"
+                printf 'Current Redis volume: %s\n' "${current_volume:-<bind-mount>}"
+                mapfile -t redis_volumes < <(
+                  docker volume ls --format '{{.Name}}' | grep -i redis | sort -u || true
+                )
+                if [ "${#redis_volumes[@]}" -eq 0 ]; then
+                  echo 'No Redis-named Docker volumes found'
+                  exit 0
+                fi
+                storage_index=0
+                for volume_name in "${redis_volumes[@]}"; do
+                  storage_index=$((storage_index + 1))
+                  storage_dir="$(mktemp -d)"
+                  storage_name="runtime-storage-audit-$$-$storage_index"
+                  docker run --rm --user 0 --entrypoint sh \
+                    -v "$volume_name:/source:ro" \
+                    -v "$storage_dir:/destination" \
+                    redis/redis-stack:7.4.0-v8 \
+                    -c 'cp -a /source/. /destination/ && chmod -R ugo+rwX /destination'
+                  cleanup_storage_audit() {
+                    docker rm -f "$storage_name" >/dev/null 2>&1 || true
+                    rm -rf "$storage_dir"
+                  }
+                  docker run -d --name "$storage_name" --user 0 \
+                    -v "$storage_dir:/data" \
+                    redis/redis-stack:7.4.0-v8 \
+                    redis-stack-server --appendonly yes >/dev/null
+                  storage_ready=false
+                  for _attempt in $(seq 1 30); do
+                    if docker exec "$storage_name" redis-cli ping | grep -q PONG; then
+                      storage_ready=true
+                      break
+                    fi
+                    sleep 1
+                  done
+                  if [ "$storage_ready" != true ]; then
+                    printf 'Volume %s could not be loaded as Redis data\n' "$volume_name"
+                    docker logs "$storage_name" 2>&1 | tail -n 20
+                    cleanup_storage_audit
+                    continue
+                  fi
+                  printf 'Volume %s, DBSIZE=%s%s\n' \
+                    "$volume_name" \
+                    "$(docker exec "$storage_name" redis-cli --raw DBSIZE)" \
+                    "$([ "$volume_name" = "$current_volume" ] && printf ' (current)' || true)"
+                  for pattern in \
+                    "users:*:strategies:$RUNTIME_STRATEGY:*" \
+                    "users:*:runtime:deployments:*" \
+                    "users:*:trading-accounts:*"
+                  do
+                    docker exec "$storage_name" redis-cli --scan --pattern "$pattern" |
+                      while IFS= read -r key; do
+                        [ -n "$key" ] || continue
+                        key_type="$(docker exec "$storage_name" redis-cli --raw TYPE "$key")"
+                        printf '%s [%s]\n' "$key" "$key_type"
+                      done
+                  done
+                  cleanup_storage_audit
                 done
                 exit 0
                 ;;
