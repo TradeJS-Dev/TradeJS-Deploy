@@ -82,6 +82,11 @@ restored DBSIZE to equal the live source DBSIZE.
 `audit-storage` copies Redis-named Docker volumes through read-only mounts into
 temporary directories and reports only DBSIZE plus matching runtime/account
 key names/types; it never starts Redis against an original volume.
+`bootstrap` is the guarded empty-Redis recovery path. It accepts a secret-free
+base64 JSON config, publishes an immutable release, creates a deployment only
+when that id is absent, and leaves entries paused. Account credentials are
+never accepted by this workflow and must be restored separately through the
+authenticated account UI.
 
 ## Local Files
 
