@@ -128,7 +128,7 @@ assert(
   redisBackup.includes('BGSAVE') &&
     redisBackup.includes('sha256sum') &&
     redisBackup.includes('LASTSAVE') &&
-    redisBackup.includes('persistent-key mismatch') &&
+    redisBackup.includes('redis-check-rdb') &&
     redisBackup.includes('PTTL') &&
     redisBackup.includes('tradejs-redis-backup/v1'),
   'Redis backup script does not save, checksum, and restore-drill the data',

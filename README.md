@@ -78,9 +78,10 @@ deployment. Migration converts the selected legacy
 per-strategy `releaseVersion` and leaves new entries paused for inspection.
 `audit-backups` checksum-verifies the five newest RDB files and prints only
 their DBSIZE plus matching runtime key names/types. Restore drills require the
-restored persistent-key count (`PTTL=-1`) to equal the live source count;
-expiring keys may legitimately disappear during a drill. DBSIZE remains in the
-backup metadata for diagnostics.
+snapshot to be newer than the previous `LASTSAVE`, pass `redis-check-rdb`,
+match its checksum, and load successfully in an isolated Redis. Live versus
+snapshot persistent-key/DBSIZE drift is reported for diagnostics but is not a
+hard failure because keys may change around the BGSAVE fork boundary.
 `audit-storage` copies Redis-named Docker volumes through read-only mounts into
 temporary directories and reports only DBSIZE plus matching runtime/account
 key names/types; it never starts Redis against an original volume.

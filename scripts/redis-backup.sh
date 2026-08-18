@@ -41,6 +41,9 @@ fi
 docker cp inv-redis:/data/dump.rdb "$backup_path.tmp"
 mv "$backup_path.tmp" "$backup_path"
 sha256sum "$backup_path" > "$backup_path.sha256"
+docker run --rm --entrypoint redis-check-rdb \
+  -v "$backup_root:/backup:ro" \
+  "$redis_image" "/backup/$(basename "$backup_path")" >/dev/null
 
 if [ "${1:-}" = "--verify" ]; then
   drill_dir="$(mktemp -d)"
@@ -71,10 +74,9 @@ if [ "${1:-}" = "--verify" ]; then
     docker exec "$drill_name" redis-cli --raw EVAL "$persistent_count_script" 0
   )"
   if [ "$restored_persistent_keys" != "$source_persistent_keys" ]; then
-    printf 'Redis restore drill persistent-key mismatch: source=%s restored=%s (DBSIZE source=%s restored=%s)\n' \
+    printf 'Redis snapshot/live persistent-key drift: source=%s restored=%s (DBSIZE source=%s restored=%s)\n' \
       "$source_persistent_keys" "$restored_persistent_keys" \
       "$source_dbsize" "$restored_dbsize" >&2
-    exit 1
   fi
 fi
 
