@@ -19,6 +19,8 @@ persistent volumes, infrastructure containers, and server-only secrets.
 - Keep personal package composition, runtime app Dockerfile, cron, and
   `tradejs.config.ts` in `TradeJS-Project`.
 - Keep engine package publishing and ML inference implementation in `TradeJS`.
+- Reject any production Project image whose package manifest contains an npm
+  prerelease; beta validation belongs to the isolated Project smoke flow.
 - Keep the research-agent image in `TradeJS`, but route strategy edits and pull
   requests to the standalone strategy repositories on their `main` branches.
 

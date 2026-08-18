@@ -15,6 +15,14 @@ const next = read(nextPath);
 if (next.schema !== 'tradejs-runtime-package-manifest/v1') {
   throw new Error('Incoming image has an invalid runtime package manifest');
 }
+const prereleasePackages = Object.entries(next.packages ?? {})
+  .filter(([, version]) => !/^\d+\.\d+\.\d+$/.test(String(version)))
+  .map(([name, version]) => `${name}@${version}`);
+if (prereleasePackages.length) {
+  throw new Error(
+    `Production image contains non-stable packages: ${prereleasePackages.join(', ')}`,
+  );
+}
 const names = [
   ...new Set([
     ...Object.keys(previous.packages ?? {}),

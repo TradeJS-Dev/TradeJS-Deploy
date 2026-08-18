@@ -18,6 +18,10 @@ from source and it does not depend directly on npm package publishing.
 - The server pulls only tagged images and runs `docker compose`.
 - App tags and Project refs must be immutable commit SHAs; `latest` is rejected for app rollouts.
 - Every app image contains `/app/runtime-package-manifest.json`. Deploy stores and compares the old/new manifests so strategy package changes are explicit before a Redis release pointer is switched.
+- Production Project images contain only exact stable npm versions. Beta packages
+  are exercised in isolated production-like smoke containers; the weekly
+  Project composition sync batches promoted `latest` packages into one image
+  before Deploy sees any new app SHA.
 - The app image supervises Next.js, the signals daemon, and the market WebSocket gateway. The compose healthcheck requires both ports `3000` and `3001` to be healthy, while Nginx proxies `/ws/market` to the gateway with WebSocket upgrade headers.
 - Deploy waits for the updated app container to become healthy, prints its logs and fails on timeout/unhealthy status, then validates the running Nginx configuration with `nginx -t`.
 - Deployment ensures a persistent 4 GB `/swapfile`, caps the main service containers through Compose memory limits, and keeps runtime signals for three days by default.

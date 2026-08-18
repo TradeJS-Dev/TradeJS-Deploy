@@ -102,8 +102,11 @@ assert(
   'Redis backup script does not verify the canonical snapshot',
 );
 assert(
-  workflow.includes('runtime-package-manifest.json') &&
+    workflow.includes('runtime-package-manifest.json') &&
     workflow.includes('compare-runtime-manifests.mjs') &&
+    read('scripts/compare-runtime-manifests.mjs').includes(
+      'Production image contains non-stable packages',
+    ) &&
     workflow.includes('release.env.previous') &&
     workflow.includes('rollback_app') &&
     workflow.includes('./scripts/rollback-app.sh') &&
