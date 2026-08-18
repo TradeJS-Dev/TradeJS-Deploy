@@ -93,6 +93,11 @@ large snapshots.
 `audit-storage` copies Redis-named Docker volumes through read-only mounts into
 temporary directories and reports only DBSIZE plus matching runtime/account
 key names/types; it never starts Redis against an original volume.
+`restore-volume` is a confirmed recovery operation for the one-time persistence
+migration. It first backs up the current state, selects the newest verified
+non-empty snapshot created outside `/data`, restores it through the durable-AOF
+converter, and requires the versioned release/deployment keys to exist while
+the mutable legacy config remains absent.
 `bootstrap` is the guarded empty-Redis recovery path. It accepts a secret-free
 base64 JSON config, publishes an immutable release, creates a deployment only
 when that id is absent, and leaves entries paused. Account credentials are
