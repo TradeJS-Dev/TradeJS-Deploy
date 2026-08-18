@@ -126,8 +126,11 @@ assert(
     runtimeConfigWorkflow.includes('bootstrap | rollout') &&
     runtimeConfigWorkflow.includes('RUNTIME_PROVIDER: ${{ inputs.connector_name }}') &&
     runtimeConfigWorkflow.includes('restore-volume') &&
+    runtimeConfigWorkflow.includes('restore-account') &&
     runtimeConfigWorkflow.includes('Restored Redis does not contain the versioned runtime binding') &&
     runtimeConfigWorkflow.includes('pre-manual-restore') &&
+    runtimeConfigWorkflow.includes('without exposing its value') &&
+    runtimeConfigWorkflow.includes('refusing to overwrite it') &&
     runtimeConfigWorkflow.includes('--user 0'),
   'Runtime config writes are not guarded by confirmation, backup, and verification',
 );

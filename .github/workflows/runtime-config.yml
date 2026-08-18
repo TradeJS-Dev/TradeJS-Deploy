@@ -14,6 +14,7 @@ on:
           - audit-backups
           - audit-storage
           - restore-volume
+          - restore-account
           - bootstrap
           - rollout
           - migrate
@@ -283,6 +284,9 @@ jobs:
               restore-volume)
                 mutates=true
                 ;;
+              restore-account)
+                mutates=true
+                ;;
               bootstrap | rollout)
                 mutates=true
                 if [ -z "$RUNTIME_CONFIG_BASE64" ] || \
@@ -423,6 +427,80 @@ jobs:
               printf 'Restored %s with %s persistent keys from %s\n' \
                 "$deployment_key" "$restored_persistent" \
                 "$(basename "$recovery_backup")"
+              exit 0
+            fi
+
+            if [ "$RUNTIME_ACTION" = restore-account ]; then
+              account_key="users:$RUNTIME_USER:trading-accounts:$RUNTIME_ACCOUNT"
+              if [ "$(docker exec inv-redis redis-cli --raw EXISTS "$account_key")" != 0 ]; then
+                echo 'Live trading account already exists; refusing to overwrite it' >&2
+                exit 1
+              fi
+              mapfile -t account_backups < <(
+                find "$HOME/backups/redis" -maxdepth 1 -type f -name 'dump-*.rdb' |
+                  sort -r |
+                  head -n 20
+              )
+              account_restored=false
+              account_restore_source=""
+              account_audit_index=0
+              for backup in "${account_backups[@]}"; do
+                [ -f "$backup.sha256" ] || continue
+                account_audit_index=$((account_audit_index + 1))
+                sha256sum --check "$backup.sha256"
+                account_audit_name="runtime-account-audit-$$-$account_audit_index"
+                cleanup_account_audit() {
+                  docker rm -f "$account_audit_name" >/dev/null 2>&1 || true
+                }
+                docker run -d --name "$account_audit_name" --user 0 \
+                  -v "$backup:/data/dump.rdb:ro" \
+                  redis/redis-stack:7.4.0-v8 \
+                  redis-stack-server --dir /data --dbfilename dump.rdb \
+                  --appendonly no >/dev/null
+                account_audit_ready=false
+                for _attempt in $(seq 1 300); do
+                  if docker exec "$account_audit_name" redis-cli ping 2>/dev/null | grep -q PONG; then
+                    account_audit_ready=true
+                    break
+                  fi
+                  sleep 1
+                done
+                if [ "$account_audit_ready" != true ]; then
+                  docker logs "$account_audit_name"
+                  cleanup_account_audit
+                  exit 1
+                fi
+                if [ "$(docker exec "$account_audit_name" redis-cli --raw EXISTS "$account_key")" = 1 ]; then
+                  if [ "$(docker exec "$account_audit_name" redis-cli --raw JSON.TYPE "$account_key")" != object ]; then
+                    cleanup_account_audit
+                    echo 'Archived trading account is not a RedisJSON object' >&2
+                    exit 1
+                  fi
+                  docker exec "$account_audit_name" redis-cli --raw JSON.GET "$account_key" |
+                    docker exec -i inv-redis redis-cli -x JSON.SET "$account_key" '$' >/dev/null
+                  account_restored=true
+                  account_restore_source="$(basename "$backup")"
+                  cleanup_account_audit
+                  break
+                fi
+                cleanup_account_audit
+              done
+              if [ "$account_restored" != true ]; then
+                echo 'Trading account was not found in retained Redis backups' >&2
+                exit 1
+              fi
+              if [ "$(docker exec inv-redis redis-cli --raw TYPE "$account_key")" != ReJSON-RL ] || \
+                [ "$(docker exec inv-redis redis-cli --raw JSON.TYPE "$account_key")" != object ]
+              then
+                echo 'Restored trading account failed RedisJSON validation' >&2
+                exit 1
+              fi
+              docker exec app ./node_modules/.bin/tradejs runtime-config verify \
+                --user "$RUNTIME_USER" \
+                --deployment "$RUNTIME_DEPLOYMENT"
+              ./scripts/redis-backup.sh --verify
+              printf 'Restored trading account %s from %s without exposing its value\n' \
+                "$account_key" "$account_restore_source"
               exit 0
             fi
 

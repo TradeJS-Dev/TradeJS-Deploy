@@ -98,6 +98,11 @@ migration. It first backs up the current state, selects the newest verified
 non-empty snapshot created outside `/data`, restores it through the durable-AOF
 converter, and requires the versioned release/deployment keys to exist while
 the mutable legacy config remains absent.
+`restore-account` is a separate confirmed recovery operation. It refuses to
+overwrite a live account, searches checksum-verified retained snapshots for the
+exact account key, streams its RedisJSON value directly between isolated and
+live Redis processes without logging credentials, and requires `runtime-config
+verify` to pass before writing a fresh backup.
 `bootstrap` is the guarded empty-Redis recovery path. It accepts a secret-free
 base64 JSON config, publishes an immutable release, creates a deployment only
 when that id is absent, and leaves entries paused. Account credentials are
