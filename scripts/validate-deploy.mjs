@@ -95,7 +95,12 @@ assert(
   'Redis Stack image is not pinned',
 );
 assert(
-  compose.includes('--appendonly') && compose.includes('everysec'),
+  compose.includes('--dir') &&
+    compose.includes('/data') &&
+    compose.includes('--dbfilename') &&
+    compose.includes('dump.rdb') &&
+    compose.includes('--appendonly') &&
+    compose.includes('everysec'),
   'Redis AOF persistence is not enabled',
 );
 assert(
@@ -131,14 +136,24 @@ assert(
   redisBackup.includes('BGSAVE') &&
     redisBackup.includes('sha256sum') &&
     redisBackup.includes('LASTSAVE') &&
+    redisBackup.includes('CONFIG GET dir') &&
+    redisBackup.includes('CONFIG GET dbfilename') &&
     redisBackup.includes('redis-check-rdb') &&
     redisBackup.includes('PTTL') &&
     redisBackup.includes('--user 0') &&
     redisBackup.includes('/data/dump.rdb:ro') &&
     redisBackup.includes('--dir /data --dbfilename dump.rdb') &&
+    redisBackup.includes('--prepare-volume') &&
+    redisBackup.includes('pre-canonical-') &&
     redisBackup.includes('loaded no persistent keys') &&
     redisBackup.includes('tradejs-redis-backup/v1'),
   'Redis backup script does not save, checksum, and restore-drill the data',
+);
+assert(
+  workflow.includes('./scripts/redis-backup.sh --verify --prepare-volume') &&
+    workflow.includes('Redis persistent-key mismatch after Compose update') &&
+    workflow.includes('redis_persistent_count_script'),
+  'Deploy does not migrate and verify Redis persistence before Compose updates',
 );
 assert(
   workflow.includes('runtime-package-manifest.json') &&

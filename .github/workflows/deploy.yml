@@ -299,19 +299,51 @@ jobs:
             fi
 
             redis_was_running=false
+            redis_dbsize_before=""
+            redis_persistent_before=""
+            redis_persistent_count_script="local cursor='0'; local count=0; repeat local result=redis.call('SCAN', cursor, 'COUNT', 1000); cursor=result[1]; for _, key in ipairs(result[2]) do if redis.call('PTTL', key) == -1 then count=count+1 end end until cursor == '0'; return count"
             if docker inspect inv-redis >/dev/null 2>&1; then
               redis_was_running=true
-              ./scripts/redis-backup.sh --verify
+              redis_dbsize_before="$(docker exec inv-redis redis-cli --raw DBSIZE)"
+              redis_persistent_before="$(
+                docker exec inv-redis redis-cli --raw EVAL \
+                  "$redis_persistent_count_script" 0
+              )"
+              ./scripts/redis-backup.sh --verify --prepare-volume
             fi
 
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis site docs certbot certbot-cron
 
+            redis_ready=false
+            for attempt in $(seq 1 150); do
+              if docker exec inv-redis redis-cli ping 2>/dev/null | grep -q PONG; then
+                redis_ready=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$redis_ready" != true ]; then
+              docker logs --tail 200 inv-redis
+              echo 'Redis did not become ready' >&2
+              exit 1
+            fi
+
             if [ "$redis_was_running" != "true" ]; then
-              for attempt in $(seq 1 30); do
-                docker exec inv-redis redis-cli ping 2>/dev/null | grep -q PONG && break
-                sleep 2
-              done
               ./scripts/redis-backup.sh --verify
+            else
+              redis_dbsize_after="$(docker exec inv-redis redis-cli --raw DBSIZE)"
+              redis_persistent_after="$(
+                docker exec inv-redis redis-cli --raw EVAL \
+                  "$redis_persistent_count_script" 0
+              )"
+              if [ "$redis_persistent_after" != "$redis_persistent_before" ]; then
+                printf 'Redis persistent-key mismatch after Compose update: before=%s after=%s (DBSIZE before=%s after=%s)\n' \
+                  "$redis_persistent_before" "$redis_persistent_after" \
+                  "$redis_dbsize_before" "$redis_dbsize_after" >&2
+                exit 1
+              fi
+              printf 'Redis persistence verified after Compose update: persistent=%s DBSIZE before=%s after=%s\n' \
+                "$redis_persistent_after" "$redis_dbsize_before" "$redis_dbsize_after"
             fi
 
             timescale_ready=false

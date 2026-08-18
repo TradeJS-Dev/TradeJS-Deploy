@@ -22,6 +22,7 @@ from source and it does not depend directly on npm package publishing.
 - Deploy waits for the updated app container to become healthy, prints its logs and fails on timeout/unhealthy status, then validates the running Nginx configuration with `nginx -t`.
 - Deployment ensures a persistent 4 GB `/swapfile`, caps the main service containers through Compose memory limits, and keeps runtime signals for three days by default.
 - Redis Stack is pinned to `7.4.0-v8`, uses AOF (`everysec`) plus RDB snapshots, and is backed up with a restore drill before deploys and once per day. Backups are retained under `~/backups/redis` for 14 days by default.
+- Redis explicitly uses `/data/dump.rdb`, making the named `redisdata` volume the sole persistence location. When upgrading from the former Redis Stack standalone default directory, deploy restore-verifies the live RDB, archives detached `/data` artifacts inside the volume, seeds the verified snapshot, and requires the persistent-key count to match after Redis is recreated.
 - `tradejs.dev` and `docs.tradejs.dev` are published by the separate
   `TradeJS-Site` and `TradeJS-Docs` workflows; this deployment does not pull or
   restart their containers.

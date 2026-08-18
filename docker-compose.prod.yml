@@ -129,6 +129,10 @@ services:
       - redisdata:/data
     command:
       - redis-stack-server
+      - --dir
+      - /data
+      - --dbfilename
+      - dump.rdb
       - --appendonly
       - "yes"
       - --appendfsync
