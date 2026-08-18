@@ -38,7 +38,8 @@ assert(
     workflow.includes('DEPLOY_COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}') &&
     workflow.includes("printf 'COINALYZE_API_KEY=%s\\n'") &&
     workflow.includes('await updateUserRecord("root", { COINALYZE_API_KEY: apiKey })') &&
-    workflow.includes('Root Coinalyze credential is configured'),
+    workflow.includes('Root Coinalyze credential is configured') &&
+    workflow.includes('process.exit(0);'),
   'Deploy secret injection is incomplete',
 );
 assert(

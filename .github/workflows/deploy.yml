@@ -423,6 +423,7 @@ jobs:
                 throw new Error("Failed to synchronize the root Coinalyze credential");
               }
               console.log("Root Coinalyze credential is configured");
+              process.exit(0);
             '
 
             docker exec nginx nginx -t
