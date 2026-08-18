@@ -9,14 +9,29 @@ backup_path="$backup_root/dump-$timestamp.rdb"
 
 mkdir -p "$backup_root"
 source_dbsize="$(docker exec inv-redis redis-cli --raw DBSIZE)"
-docker exec inv-redis redis-cli BGSAVE >/dev/null
-for _attempt in $(seq 1 60); do
-  in_progress="$(docker exec inv-redis redis-cli --raw INFO persistence | tr -d '\r' | sed -n 's/^rdb_bgsave_in_progress://p')"
-  [ "$in_progress" = "0" ] && break
+last_save_before="$(docker exec inv-redis redis-cli --raw LASTSAVE)"
+while [ "$(date +%s)" -le "$last_save_before" ]; do
   sleep 1
 done
-if [ "${in_progress:-1}" != "0" ]; then
-  echo "Redis BGSAVE did not complete" >&2
+docker exec inv-redis redis-cli BGSAVE >/dev/null
+snapshot_ready=false
+for _attempt in $(seq 1 120); do
+  in_progress="$(docker exec inv-redis redis-cli --raw INFO persistence | tr -d '\r' | sed -n 's/^rdb_bgsave_in_progress://p')"
+  last_save_after="$(docker exec inv-redis redis-cli --raw LASTSAVE)"
+  last_status="$(docker exec inv-redis redis-cli --raw INFO persistence | tr -d '\r' | sed -n 's/^rdb_last_bgsave_status://p')"
+  if [ "$in_progress" = "0" ] && \
+    [ "$last_status" = "ok" ] && \
+    [ "$last_save_after" -gt "$last_save_before" ]
+  then
+    snapshot_ready=true
+    break
+  fi
+  sleep 1
+done
+if [ "$snapshot_ready" != "true" ]; then
+  printf 'Redis BGSAVE did not produce a new snapshot: before=%s after=%s status=%s in_progress=%s\n' \
+    "$last_save_before" "${last_save_after:-unknown}" "${last_status:-unknown}" \
+    "${in_progress:-unknown}" >&2
   exit 1
 fi
 docker cp inv-redis:/data/dump.rdb "$backup_path.tmp"
