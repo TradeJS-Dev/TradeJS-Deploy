@@ -6,9 +6,13 @@ retention_days="${REDIS_BACKUP_RETENTION_DAYS:-14}"
 redis_image="redis/redis-stack:7.4.0-v8"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_path="$backup_root/dump-$timestamp.rdb"
+persistent_count_script="local cursor='0'; local count=0; repeat local result=redis.call('SCAN', cursor, 'COUNT', 1000); cursor=result[1]; for _, key in ipairs(result[2]) do if redis.call('PTTL', key) == -1 then count=count+1 end end until cursor == '0'; return count"
 
 mkdir -p "$backup_root"
 source_dbsize="$(docker exec inv-redis redis-cli --raw DBSIZE)"
+source_persistent_keys="$(
+  docker exec inv-redis redis-cli --raw EVAL "$persistent_count_script" 0
+)"
 last_save_before="$(docker exec inv-redis redis-cli --raw LASTSAVE)"
 while [ "$(date +%s)" -le "$last_save_before" ]; do
   sleep 1
@@ -63,15 +67,20 @@ if [ "${1:-}" = "--verify" ]; then
     exit 1
   }
   restored_dbsize="$(docker exec "$drill_name" redis-cli --raw DBSIZE)"
-  if [ "$restored_dbsize" != "$source_dbsize" ]; then
-    printf 'Redis restore drill DBSIZE mismatch: source=%s restored=%s\n' \
+  restored_persistent_keys="$(
+    docker exec "$drill_name" redis-cli --raw EVAL "$persistent_count_script" 0
+  )"
+  if [ "$restored_persistent_keys" != "$source_persistent_keys" ]; then
+    printf 'Redis restore drill persistent-key mismatch: source=%s restored=%s (DBSIZE source=%s restored=%s)\n' \
+      "$source_persistent_keys" "$restored_persistent_keys" \
       "$source_dbsize" "$restored_dbsize" >&2
     exit 1
   fi
 fi
 
-printf '{"schema":"tradejs-redis-backup/v1","createdAt":"%s","dbSize":%s}\n' \
-  "$timestamp" "$source_dbsize" > "$backup_path.meta.json"
+printf '{"schema":"tradejs-redis-backup/v1","createdAt":"%s","dbSize":%s,"persistentKeyCount":%s}\n' \
+  "$timestamp" "$source_dbsize" "$source_persistent_keys" \
+  > "$backup_path.meta.json"
 
 find "$backup_root" -type f \( \
   -name 'dump-*.rdb' -o \
