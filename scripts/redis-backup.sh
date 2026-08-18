@@ -8,6 +8,7 @@ timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_path="$backup_root/dump-$timestamp.rdb"
 
 mkdir -p "$backup_root"
+source_dbsize="$(docker exec inv-redis redis-cli --raw DBSIZE)"
 docker exec inv-redis redis-cli BGSAVE >/dev/null
 for _attempt in $(seq 1 60); do
   in_progress="$(docker exec inv-redis redis-cli --raw INFO persistence | tr -d '\r' | sed -n 's/^rdb_bgsave_in_progress://p')"
@@ -46,9 +47,21 @@ if [ "${1:-}" = "--verify" ]; then
     echo "Redis restore drill failed" >&2
     exit 1
   }
-  docker exec "$drill_name" redis-cli DBSIZE >/dev/null
+  restored_dbsize="$(docker exec "$drill_name" redis-cli --raw DBSIZE)"
+  if [ "$restored_dbsize" != "$source_dbsize" ]; then
+    printf 'Redis restore drill DBSIZE mismatch: source=%s restored=%s\n' \
+      "$source_dbsize" "$restored_dbsize" >&2
+    exit 1
+  fi
 fi
 
-find "$backup_root" -type f \( -name 'dump-*.rdb' -o -name 'dump-*.rdb.sha256' \) \
+printf '{"schema":"tradejs-redis-backup/v1","createdAt":"%s","dbSize":%s}\n' \
+  "$timestamp" "$source_dbsize" > "$backup_path.meta.json"
+
+find "$backup_root" -type f \( \
+  -name 'dump-*.rdb' -o \
+  -name 'dump-*.rdb.sha256' -o \
+  -name 'dump-*.rdb.meta.json' \
+\) \
   -mtime "+$retention_days" -delete
 echo "$backup_path"

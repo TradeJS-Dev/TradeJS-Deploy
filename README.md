@@ -76,6 +76,9 @@ passes a restore drill, then runs `runtime-config verify` against the selected
 deployment. Migration converts the selected legacy
 `users:<user>:strategies:<Strategy>:<config>` value into the next immutable
 per-strategy `releaseVersion` and leaves new entries paused for inspection.
+`audit-backups` checksum-verifies the five newest RDB files and prints only
+their DBSIZE plus matching runtime key names/types. Restore drills require the
+restored DBSIZE to equal the live source DBSIZE.
 
 ## Local Files
 

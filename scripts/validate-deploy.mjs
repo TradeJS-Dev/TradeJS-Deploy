@@ -124,7 +124,8 @@ assert(
 assert(
   redisBackup.includes('BGSAVE') &&
     redisBackup.includes('sha256sum') &&
-    redisBackup.includes('DBSIZE'),
+    redisBackup.includes('DBSIZE mismatch') &&
+    redisBackup.includes('tradejs-redis-backup/v1'),
   'Redis backup script does not save, checksum, and restore-drill the data',
 );
 assert(
