@@ -9,6 +9,17 @@ These rules apply to the complete `TradeJS-Deploy` repository.
 This repository owns server orchestration: SSH deployment, Compose, TLS,
 persistent volumes, infrastructure containers, and server-only secrets.
 
+## Workspace Routing
+
+- Start from `~/dev/tradejs/AGENTS.md`; do not scan sibling repositories.
+- Use this repository only for production Compose, SSH, TLS, persistent
+  volumes, server lifecycle, and secret injection. The app image and personal
+  runtime composition belong in `tradejs-project`; engine code belongs in
+  `investing`; strategy code belongs in standalone strategy repositories.
+- Local Redis/backtests/evidence inspection happens in `tradejs-project`.
+  Production inspection must target the actual runtime server and must not be
+  inferred from the local project.
+
 ## Boundaries
 
 - Deploy the app image published by `TradeJS-Project`, pinned by image tag.
