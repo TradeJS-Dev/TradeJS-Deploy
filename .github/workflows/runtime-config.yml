@@ -14,6 +14,7 @@ on:
           - audit-backups
           - audit-storage
           - bootstrap
+          - rollout
           - migrate
           - pause
           - resume
@@ -54,7 +55,7 @@ on:
         default: bybit
         type: string
       config_base64:
-        description: "Secret-free strategy config JSON encoded as base64; bootstrap only"
+        description: "Secret-free strategy config JSON encoded as base64; bootstrap or rollout"
         required: false
         type: string
       rollback_release:
@@ -62,7 +63,7 @@ on:
         required: false
         type: string
       confirm_mutation:
-        description: "Required for migrate, pause, resume, and rollback"
+        description: "Required for bootstrap, rollout, migrate, pause, resume, and rollback"
         required: true
         default: false
         type: boolean
@@ -135,10 +136,10 @@ jobs:
               --deployment "$RUNTIME_DEPLOYMENT"
             )
             mutates=false
-            bootstrap_config_path=''
+            runtime_config_path=''
             cleanup_runtime_config() {
-              if [ -n "$bootstrap_config_path" ]; then
-                docker exec app rm -f "$bootstrap_config_path" >/dev/null 2>&1 || true
+              if [ -n "$runtime_config_path" ]; then
+                docker exec app rm -f "$runtime_config_path" >/dev/null 2>&1 || true
               fi
             }
             trap cleanup_runtime_config EXIT
@@ -282,7 +283,7 @@ jobs:
                 done
                 exit 0
                 ;;
-              bootstrap)
+              bootstrap | rollout)
                 mutates=true
                 if [ -z "$RUNTIME_CONFIG_BASE64" ] || \
                   [[ ! "$RUNTIME_CONFIG_BASE64" =~ ^[A-Za-z0-9+/=]+$ ]]
@@ -290,22 +291,26 @@ jobs:
                   echo 'config_base64 must contain a base64-encoded JSON object' >&2
                   exit 1
                 fi
-                bootstrap_config_path="/tmp/runtime-bootstrap-$$.json"
+                runtime_config_path="/tmp/runtime-config-$$.json"
                 printf '%s' "$RUNTIME_CONFIG_BASE64" |
                   base64 --decode |
                   docker exec -i app sh -c \
-                    "umask 077; cat > '$bootstrap_config_path'"
+                    "umask 077; cat > '$runtime_config_path'"
                 docker exec app node -e \
                   'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' \
-                  "$bootstrap_config_path"
+                  "$runtime_config_path"
                 command+=(
-                  --file "$bootstrap_config_path"
-                  --account "$RUNTIME_ACCOUNT"
-                  --connector "$RUNTIME_CONNECTOR"
-                  --provider "$RUNTIME_PROVIDER"
-                  --label "$RUNTIME_DEPLOYMENT"
+                  --file "$runtime_config_path"
                   --write
                 )
+                if [ "$RUNTIME_ACTION" = bootstrap ]; then
+                  command+=(
+                    --account "$RUNTIME_ACCOUNT"
+                    --connector "$RUNTIME_CONNECTOR"
+                    --provider "$RUNTIME_PROVIDER"
+                    --label "$RUNTIME_DEPLOYMENT"
+                  )
+                fi
                 ;;
               migrate)
                 mutates=true
