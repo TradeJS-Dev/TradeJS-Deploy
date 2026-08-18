@@ -69,7 +69,8 @@ Manual deploy supports overriding:
 ## Runtime strategy operations
 
 Use the manual `Runtime strategy config` workflow instead of editing RedisJSON
-directly. `verify` is read-only. `migrate`, `pause`, `resume`, and `rollback`
+directly. `verify` is read-only; `audit` prints only matching Redis key names
+and types, never config values. `migrate`, `pause`, `resume`, and `rollback`
 require `confirm_mutation=true`; each write first creates a Redis backup and
 passes a restore drill, then runs `runtime-config verify` against the selected
 deployment. Migration converts the selected legacy

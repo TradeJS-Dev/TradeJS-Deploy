@@ -111,7 +111,8 @@ assert(
   runtimeConfigWorkflow.includes('environment: production') &&
     runtimeConfigWorkflow.includes('confirm_mutation') &&
     runtimeConfigWorkflow.includes('./scripts/redis-backup.sh --verify') &&
-    runtimeConfigWorkflow.includes('runtime-config verify'),
+    runtimeConfigWorkflow.includes('runtime-config verify') &&
+    runtimeConfigWorkflow.includes('redis-cli --scan --pattern'),
   'Runtime config writes are not guarded by confirmation, backup, and verification',
 );
 assert(

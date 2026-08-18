@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - verify
+          - audit
           - migrate
           - pause
           - resume
@@ -107,6 +108,22 @@ jobs:
             mutates=false
             case "$RUNTIME_ACTION" in
               verify)
+                ;;
+              audit)
+                for pattern in \
+                  "users:$RUNTIME_USER:strategies:$RUNTIME_STRATEGY:*" \
+                  "users:$RUNTIME_USER:runtime:deployments:*" \
+                  "users:$RUNTIME_USER:runtime:strategy-releases:$RUNTIME_STRATEGY:*"
+                do
+                  printf 'Keys matching %s:\n' "$pattern"
+                  docker exec inv-redis redis-cli --scan --pattern "$pattern" |
+                    while IFS= read -r key; do
+                      [ -n "$key" ] || continue
+                      key_type="$(docker exec inv-redis redis-cli --raw TYPE "$key")"
+                      printf '%s [%s]\n' "$key" "$key_type"
+                    done
+                done
+                exit 0
                 ;;
               migrate)
                 mutates=true
