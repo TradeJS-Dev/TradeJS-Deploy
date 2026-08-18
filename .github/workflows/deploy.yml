@@ -5,12 +5,10 @@ on:
       image_tag:
         description: "Docker image tag to deploy"
         required: true
-        default: latest
         type: string
       project_sha:
         description: "TradeJS-Project Git ref owning runtime config"
         required: true
-        default: main
         type: string
       app_changed:
         description: "Redeploy app"
@@ -91,18 +89,31 @@ jobs:
           PAYLOAD_ML_INFER_CHANGED: ${{ github.event.client_payload.ml_infer_changed }}
         run: |
           if [ "$EVENT_NAME" = "repository_dispatch" ]; then
-            echo "image_tag=${PAYLOAD_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-            echo "project_sha=${PAYLOAD_PROJECT_SHA:-main}" >> "$GITHUB_OUTPUT"
-            echo "app_changed=${PAYLOAD_APP_CHANGED}" >> "$GITHUB_OUTPUT"
-            echo "agent_changed=${PAYLOAD_AGENT_CHANGED}" >> "$GITHUB_OUTPUT"
-            echo "ml_infer_changed=${PAYLOAD_ML_INFER_CHANGED}" >> "$GITHUB_OUTPUT"
+            resolved_image_tag="$PAYLOAD_IMAGE_TAG"
+            resolved_project_sha="$PAYLOAD_PROJECT_SHA"
+            resolved_app_changed="$PAYLOAD_APP_CHANGED"
+            resolved_agent_changed="$PAYLOAD_AGENT_CHANGED"
+            resolved_ml_infer_changed="$PAYLOAD_ML_INFER_CHANGED"
           else
-            echo "image_tag=${INPUT_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-            echo "project_sha=${INPUT_PROJECT_SHA}" >> "$GITHUB_OUTPUT"
-            echo "app_changed=${INPUT_APP_CHANGED}" >> "$GITHUB_OUTPUT"
-            echo "agent_changed=${INPUT_AGENT_CHANGED}" >> "$GITHUB_OUTPUT"
-            echo "ml_infer_changed=${INPUT_ML_INFER_CHANGED}" >> "$GITHUB_OUTPUT"
+            resolved_image_tag="$INPUT_IMAGE_TAG"
+            resolved_project_sha="$INPUT_PROJECT_SHA"
+            resolved_app_changed="$INPUT_APP_CHANGED"
+            resolved_agent_changed="$INPUT_AGENT_CHANGED"
+            resolved_ml_infer_changed="$INPUT_ML_INFER_CHANGED"
           fi
+          if [ "${#resolved_image_tag}" -ne 40 ] || printf '%s' "$resolved_image_tag" | grep -q '[^0-9a-f]'; then
+            echo "App image tag must be a full commit SHA" >&2
+            exit 1
+          fi
+          if [ "${#resolved_project_sha}" -ne 40 ] || printf '%s' "$resolved_project_sha" | grep -q '[^0-9a-f]'; then
+            echo "TradeJS-Project ref must be a full commit SHA" >&2
+            exit 1
+          fi
+          echo "image_tag=$resolved_image_tag" >> "$GITHUB_OUTPUT"
+          echo "project_sha=$resolved_project_sha" >> "$GITHUB_OUTPUT"
+          echo "app_changed=$resolved_app_changed" >> "$GITHUB_OUTPUT"
+          echo "agent_changed=$resolved_agent_changed" >> "$GITHUB_OUTPUT"
+          echo "ml_infer_changed=$resolved_ml_infer_changed" >> "$GITHUB_OUTPUT"
 
       - name: Checkout immutable TradeJS project config
         uses: actions/checkout@v6
@@ -162,7 +173,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: ".env,release-update.env,docker-compose.prod.yml,nginx,sql,certbot,init-cert.sh,ensure-swap.sh"
+          source: ".env,release-update.env,docker-compose.prod.yml,nginx,sql,certbot,scripts,init-cert.sh,ensure-swap.sh"
           target: ~/
 
       - name: Deploy on server
@@ -175,8 +186,8 @@ jobs:
           script: |
             set -e
             cd ~/
-            mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh
-            chmod +x ./init-cert.sh ./ensure-swap.sh
+            mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh releases scripts
+            chmod +x ./init-cert.sh ./ensure-swap.sh ./scripts/redis-backup.sh
             ./ensure-swap.sh
 
             cat > agent-ssh/id_ed25519 <<'EOF'
@@ -204,8 +215,13 @@ jobs:
             fi
             export $(grep -v '^#' release-update.env | xargs)
 
+            had_previous_release=false
+            if [ -f release.env ]; then
+              cp release.env release.env.previous
+              had_previous_release=true
+            fi
             if [ ! -f release.env ]; then
-              APP_IMAGE_TAG=latest
+              APP_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
               AGENT_IMAGE_TAG=latest
               ML_INFER_IMAGE_TAG=latest
             fi
@@ -239,7 +255,40 @@ jobs:
               docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull $CHANGED_SERVICES
             fi
 
+            if [ "$APP_CHANGED" = "true" ]; then
+              previous_manifest="releases/runtime-package-manifest-previous.json"
+              incoming_manifest="releases/runtime-package-manifest-$PROJECT_SHA.json"
+              manifest_diff="releases/runtime-package-diff-$PROJECT_SHA.json"
+              if ! docker cp app:/app/runtime-package-manifest.json "$previous_manifest" >/dev/null 2>&1; then
+                printf '{"packages":{}}\n' > "$previous_manifest"
+              fi
+              short_project_sha="$(printf '%s' "$PROJECT_SHA" | cut -c1-12)"
+              incoming_container="runtime-manifest-$short_project_sha"
+              docker rm -f "$incoming_container" >/dev/null 2>&1 || true
+              docker create --name "$incoming_container" "ghcr.io/tradejs-dev/tradejs-project-app:$APP_IMAGE_TAG" >/dev/null
+              docker cp "$incoming_container:/app/runtime-package-manifest.json" "$incoming_manifest"
+              docker rm "$incoming_container" >/dev/null
+              docker run --rm --entrypoint node -v "$HOME:/deploy" \
+                "ghcr.io/tradejs-dev/tradejs-project-app:$APP_IMAGE_TAG" \
+                /deploy/scripts/compare-runtime-manifests.mjs \
+                "/deploy/$previous_manifest" "/deploy/$incoming_manifest" "/deploy/$manifest_diff"
+            fi
+
+            redis_was_running=false
+            if docker inspect inv-redis >/dev/null 2>&1; then
+              redis_was_running=true
+              ./scripts/redis-backup.sh --verify
+            fi
+
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis site docs certbot certbot-cron
+
+            if [ "$redis_was_running" != "true" ]; then
+              for attempt in $(seq 1 30); do
+                docker exec inv-redis redis-cli ping 2>/dev/null | grep -q PONG && break
+                sleep 2
+              done
+              ./scripts/redis-backup.sh --verify
+            fi
 
             timescale_ready=false
             for attempt in $(seq 1 30); do
@@ -269,6 +318,13 @@ jobs:
             docker restart nginx
 
             if [ "$APP_CHANGED" = "true" ]; then
+              rollback_app() {
+                if [ "$had_previous_release" = "true" ] && [ -f release.env.previous ]; then
+                  cp release.env.previous release.env
+                  docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d app
+                fi
+                exit 1
+              }
               app_health=""
               for attempt in $(seq 1 30); do
                 app_health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app)"
@@ -277,7 +333,7 @@ jobs:
                 fi
                 if [ "$app_health" = "unhealthy" ]; then
                   docker logs --tail 200 app
-                  exit 1
+                  rollback_app
                 fi
                 sleep 5
               done
@@ -285,7 +341,7 @@ jobs:
               if [ "$app_health" != "healthy" ]; then
                 docker logs --tail 200 app
                 echo "App did not become healthy: $app_health" >&2
-                exit 1
+                rollback_app
               fi
             fi
 

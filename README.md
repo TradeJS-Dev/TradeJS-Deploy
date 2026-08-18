@@ -16,9 +16,12 @@ from source and it does not depend directly on npm package publishing.
   `repository_dispatch` or `workflow_dispatch`, then reads the secret-free app
   runtime config from that exact Project revision.
 - The server pulls only tagged images and runs `docker compose`.
+- App tags and Project refs must be immutable commit SHAs; `latest` is rejected for app rollouts.
+- Every app image contains `/app/runtime-package-manifest.json`. Deploy stores and compares the old/new manifests so strategy package changes are explicit before a Redis release pointer is switched.
 - The app image supervises Next.js, the signals daemon, and the market WebSocket gateway. The compose healthcheck requires both ports `3000` and `3001` to be healthy, while Nginx proxies `/ws/market` to the gateway with WebSocket upgrade headers.
 - Deploy waits for the updated app container to become healthy, prints its logs and fails on timeout/unhealthy status, then validates the running Nginx configuration with `nginx -t`.
 - Deployment ensures a persistent 4 GB `/swapfile`, caps the main service containers through Compose memory limits, and keeps runtime signals for three days by default.
+- Redis Stack is pinned to `7.4.0-v8`, uses AOF (`everysec`) plus RDB snapshots, and is backed up with a restore drill before deploys and once per day. Backups are retained under `~/backups/redis` for 14 days by default.
 - `tradejs.dev` and `docs.tradejs.dev` are published by the separate
   `TradeJS-Site` and `TradeJS-Docs` workflows; this deployment does not pull or
   restart their containers.
@@ -58,6 +61,8 @@ Manual deploy supports overriding:
 - `app_changed`
 - `agent_changed`
 - `ml_infer_changed`
+
+`image_tag` and `project_sha` must be full immutable SHAs. After a strategy package changes, publish the strategy's next Redis `releaseVersion` and switch the deployment reference only after this image is healthy. If rollback is required, first point Redis back to the prior release (paused), then restore the previous image via `release.env.previous`.
 
 ## Local Files
 

@@ -6,7 +6,9 @@ const assert = (condition, message) => {
 };
 
 const workflow = read('.github/workflows/deploy.yml');
+const backupWorkflow = read('.github/workflows/redis-backup.yml');
 const compose = read('docker-compose.prod.yml');
+const redisBackup = read('scripts/redis-backup.sh');
 
 assert(
   workflow.includes('tradejs-project-image-published'),
@@ -67,7 +69,9 @@ assert(
   'Compose still uses the TradeJS monorepo app image',
 );
 assert(
-  compose.includes('ghcr.io/tradejs-dev/tradejs-ml-infer:${ML_INFER_IMAGE_TAG}'),
+  compose.includes(
+    'ghcr.io/tradejs-dev/tradejs-ml-infer:${ML_INFER_IMAGE_TAG}',
+  ),
   'ML inference image ownership changed accidentally',
 );
 assert(
@@ -81,6 +85,45 @@ assert(
 assert(
   !compose.includes('POSTGRES_PASSWORD=app'),
   'Compose still contains the legacy Timescale password',
+);
+assert(
+  compose.includes('redis/redis-stack:7.4.0-v8') &&
+    !compose.includes('redis/redis-stack:latest'),
+  'Redis Stack image is not pinned',
+);
+assert(
+  compose.includes('--appendonly') && compose.includes('everysec'),
+  'Redis AOF persistence is not enabled',
+);
+assert(
+  workflow.includes('./scripts/redis-backup.sh --verify'),
+  'Deploy does not back up and restore-drill Redis',
+);
+assert(
+  backupWorkflow.includes('schedule:') &&
+    backupWorkflow.includes('redis-backup.sh --verify'),
+  'Redis backup restore drill is not scheduled',
+);
+assert(
+  redisBackup.includes('BGSAVE') &&
+    redisBackup.includes('sha256sum') &&
+    redisBackup.includes('DBSIZE'),
+  'Redis backup script does not save, checksum, and restore-drill the data',
+);
+assert(
+  workflow.includes('runtime-package-manifest.json') &&
+    workflow.includes('compare-runtime-manifests.mjs'),
+  'Deploy does not inspect the immutable runtime package manifest',
+);
+assert(
+  workflow.includes('release.env.previous') &&
+    workflow.includes('rollback_app'),
+  'App rollout has no automatic image rollback',
+);
+assert(
+  workflow.includes('App image tag must be a full commit SHA') &&
+    !workflow.includes('APP_IMAGE_TAG=latest'),
+  'App rollout still accepts a mutable image tag',
 );
 
 console.log('Validated TradeJS-Project to TradeJS-Deploy handoff.');
