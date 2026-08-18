@@ -203,7 +203,7 @@ jobs:
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh releases scripts
             chmod +x ./init-cert.sh ./ensure-swap.sh \
-              ./scripts/redis-backup.sh ./scripts/redis-volume-restore.sh
+              ./scripts/redis-backup.sh
             ./ensure-swap.sh
 
             if ! grep -q '^PG_PASSWORD=.' .env; then
@@ -300,90 +300,6 @@ jobs:
             fi
 
             redis_persistent_count_script="local cursor='0'; local count=0; repeat local result=redis.call('SCAN', cursor, 'COUNT', 1000); cursor=result[1]; for _, key in ipairs(result[2]) do if redis.call('PTTL', key) == -1 then count=count+1 end end until cursor == '0'; return count"
-            if docker inspect inv-redis >/dev/null 2>&1; then
-              redis_current_dir="$(
-                docker exec inv-redis redis-cli --raw CONFIG GET dir | sed -n '2p'
-              )"
-              redis_current_persistent="$(
-                docker exec inv-redis redis-cli --raw EVAL \
-                  "$redis_persistent_count_script" 0
-              )"
-              migration_marker=false
-              if docker exec inv-redis find /data -maxdepth 1 -type d \
-                -name 'pre-canonical-*' -print -quit | grep -q .
-              then
-                migration_marker=true
-              fi
-              if [ "$redis_current_dir" = /data ] && \
-                [ "$redis_current_persistent" = 0 ] && \
-                [ "$migration_marker" = true ]
-              then
-                recovery_meta=""
-                recovery_persistent=""
-                while IFS= read -r candidate_meta; do
-                  candidate_source_dir="$(
-                    sed -n 's/.*"sourceDir":"\([^"]*\)".*/\1/p' \
-                      "$candidate_meta"
-                  )"
-                  candidate_persistent="$(
-                    sed -n 's/.*"persistentKeyCount":\([0-9][0-9]*\).*/\1/p' \
-                      "$candidate_meta"
-                  )"
-                  if [ -n "$candidate_source_dir" ] && \
-                    [ "$candidate_source_dir" != /data ] && \
-                    [[ "$candidate_persistent" =~ ^[0-9]+$ ]] && \
-                    [ "$candidate_persistent" -gt 0 ]
-                  then
-                    recovery_meta="$candidate_meta"
-                    recovery_persistent="$candidate_persistent"
-                    break
-                  fi
-                done < <(
-                  find "$HOME/backups/redis" -maxdepth 1 -type f \
-                    -name 'dump-*.rdb.meta.json' | sort -r
-                )
-                if [ -z "$recovery_meta" ]; then
-                  echo 'Interrupted Redis volume migration has no non-empty source backup' >&2
-                  exit 1
-                fi
-                recovery_backup="${recovery_meta%.meta.json}"
-                redis_volume_source="$(
-                  docker inspect --format='{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' \
-                    inv-redis
-                )"
-                docker stop inv-redis >/dev/null
-                ./scripts/redis-volume-restore.sh \
-                  "$recovery_backup" "$redis_volume_source" \
-                  "$recovery_persistent" pre-recovery
-                docker compose --env-file .env --env-file release.env \
-                  -f docker-compose.prod.yml up -d redis
-                recovery_ready=false
-                for attempt in $(seq 1 150); do
-                  if docker exec inv-redis redis-cli ping 2>/dev/null | grep -q PONG; then
-                    recovery_ready=true
-                    break
-                  fi
-                  sleep 2
-                done
-                if [ "$recovery_ready" != true ]; then
-                  docker logs --tail 200 inv-redis
-                  echo 'Recovered Redis did not become ready' >&2
-                  exit 1
-                fi
-                recovered_persistent="$(
-                  docker exec inv-redis redis-cli --raw EVAL \
-                    "$redis_persistent_count_script" 0
-                )"
-                if [ "$recovered_persistent" != "$recovery_persistent" ]; then
-                  printf 'Recovered Redis persistent-key mismatch: expected=%s actual=%s\n' \
-                    "$recovery_persistent" "$recovered_persistent" >&2
-                  exit 1
-                fi
-                printf 'Recovered interrupted Redis volume migration from %s with %s persistent keys\n' \
-                  "$(basename "$recovery_backup")" "$recovered_persistent"
-              fi
-            fi
-
             redis_was_running=false
             redis_dbsize_before=""
             redis_persistent_before=""
@@ -394,7 +310,7 @@ jobs:
                 docker exec inv-redis redis-cli --raw EVAL \
                   "$redis_persistent_count_script" 0
               )"
-              ./scripts/redis-backup.sh --verify --prepare-volume
+              ./scripts/redis-backup.sh --verify
             fi
 
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis site docs certbot certbot-cron

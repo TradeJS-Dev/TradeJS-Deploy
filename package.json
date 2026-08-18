@@ -12,6 +12,7 @@
     "node": "24.x"
   },
   "scripts": {
-    "checks": "node ./scripts/validate-deploy.mjs"
+    "test": "node --test ./tests/*.test.mjs",
+    "checks": "node ./scripts/validate-deploy.mjs && yarn test"
   }
 }

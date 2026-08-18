@@ -5,20 +5,15 @@ backup_root="${REDIS_BACKUP_DIR:-$HOME/backups/redis}"
 retention_days="${REDIS_BACKUP_RETENTION_DAYS:-14}"
 redis_image="redis/redis-stack:7.4.0-v8"
 redis_container="${REDIS_CONTAINER:-inv-redis}"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_path="$backup_root/dump-$timestamp.rdb"
 persistent_count_script="local cursor='0'; local count=0; repeat local result=redis.call('SCAN', cursor, 'COUNT', 1000); cursor=result[1]; for _, key in ipairs(result[2]) do if redis.call('PTTL', key) == -1 then count=count+1 end end until cursor == '0'; return count"
 verify=false
-prepare_volume=false
 
 for argument in "$@"; do
   case "$argument" in
     --verify)
       verify=true
-      ;;
-    --prepare-volume)
-      prepare_volume=true
       ;;
     *)
       printf 'Unsupported redis-backup argument: %s\n' "$argument" >&2
@@ -26,10 +21,6 @@ for argument in "$@"; do
       ;;
   esac
 done
-if [ "$prepare_volume" = true ] && [ "$verify" != true ]; then
-  echo '--prepare-volume requires --verify' >&2
-  exit 1
-fi
 if [[ ! "$redis_container" =~ ^[A-Za-z0-9_.-]+$ ]]; then
   printf 'Invalid Redis container name: %s\n' "$redis_container" >&2
   exit 1
@@ -48,6 +39,11 @@ if [[ ! "$source_dir" =~ ^/[A-Za-z0-9_./-]+$ ]]; then
 fi
 if [[ ! "$source_dbfilename" =~ ^[A-Za-z0-9._-]+$ ]]; then
   printf 'Invalid Redis RDB filename: %s\n' "$source_dbfilename" >&2
+  exit 1
+fi
+if [ "$source_dir" != /data ] || [ "$source_dbfilename" != dump.rdb ]; then
+  printf 'Redis persistence must use /data/dump.rdb, got %s/%s\n' \
+    "$source_dir" "$source_dbfilename" >&2
   exit 1
 fi
 source_dbsize="$(docker exec "$redis_container" redis-cli --raw DBSIZE)"
@@ -129,16 +125,6 @@ if [ "$verify" = true ]; then
       "$source_persistent_keys" "$restored_persistent_keys" \
       "$source_dbsize" "$restored_dbsize" >&2
   fi
-fi
-
-if [ "$prepare_volume" = true ] && [ "$source_dir" != /data ]; then
-  volume_source="$(
-    docker inspect --format='{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' \
-      "$redis_container"
-  )"
-  "$script_dir/redis-volume-restore.sh" \
-    "$backup_path" "$volume_source" "$snapshot_persistent_keys" pre-canonical \
-    >&2
 fi
 
 printf '{"schema":"tradejs-redis-backup/v1","createdAt":"%s","dbSize":%s,"persistentKeyCount":%s,"sourceDir":"%s","sourceDbfilename":"%s"}\n' \

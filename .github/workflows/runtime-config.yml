@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Read or mutate the versioned runtime strategy binding"
+        description: "Read or mutate the canonical runtime strategy binding"
         required: true
         default: verify
         type: choice
@@ -12,12 +12,8 @@ on:
           - verify
           - audit
           - audit-backups
-          - audit-storage
-          - restore-volume
-          - restore-account
-          - bootstrap
+          - provision
           - rollout
-          - migrate
           - pause
           - resume
           - rollback
@@ -36,23 +32,18 @@ on:
         required: true
         default: doubletap-forward
         type: string
-      legacy_config_id:
-        description: "Legacy config id used only by migrate"
-        required: true
-        default: config
-        type: string
       account_id:
-        description: "Deployment account id used only by bootstrap"
+        description: "Deployment account id used only by provision"
         required: true
         default: bybit-default
         type: string
       connector_name:
-        description: "Connector and account provider used only by bootstrap"
+        description: "Connector and account provider used only by provision"
         required: true
         default: bybit
         type: string
       config_base64:
-        description: "Secret-free strategy config JSON encoded as base64; bootstrap or rollout"
+        description: "Secret-free strategy config JSON encoded as base64; provision or rollout"
         required: false
         type: string
       rollback_release:
@@ -60,7 +51,7 @@ on:
         required: false
         type: string
       confirm_mutation:
-        description: "Required for restore-volume and every runtime write"
+        description: "Required for every runtime write"
         required: true
         default: false
         type: boolean
@@ -78,10 +69,8 @@ jobs:
       RUNTIME_USER: ${{ inputs.user_name }}
       RUNTIME_STRATEGY: ${{ inputs.strategy_name }}
       RUNTIME_DEPLOYMENT: ${{ inputs.deployment_id }}
-      RUNTIME_LEGACY_CONFIG: ${{ inputs.legacy_config_id }}
       RUNTIME_ACCOUNT: ${{ inputs.account_id }}
       RUNTIME_CONNECTOR: ${{ inputs.connector_name }}
-      RUNTIME_PROVIDER: ${{ inputs.connector_name }}
       RUNTIME_CONFIG_BASE64: ${{ inputs.config_base64 }}
       RUNTIME_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}
       RUNTIME_CONFIRM_MUTATION: ${{ inputs.confirm_mutation }}
@@ -93,7 +82,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 20m
-          envs: RUNTIME_ACTION,RUNTIME_USER,RUNTIME_STRATEGY,RUNTIME_DEPLOYMENT,RUNTIME_LEGACY_CONFIG,RUNTIME_ACCOUNT,RUNTIME_CONNECTOR,RUNTIME_PROVIDER,RUNTIME_CONFIG_BASE64,RUNTIME_ROLLBACK_RELEASE,RUNTIME_CONFIRM_MUTATION
+          envs: RUNTIME_ACTION,RUNTIME_USER,RUNTIME_STRATEGY,RUNTIME_DEPLOYMENT,RUNTIME_ACCOUNT,RUNTIME_CONNECTOR,RUNTIME_CONFIG_BASE64,RUNTIME_ROLLBACK_RELEASE,RUNTIME_CONFIRM_MUTATION
           script: |
             set -Eeuo pipefail
             cd ~/
@@ -110,21 +99,90 @@ jobs:
             validate_identifier user_name "$RUNTIME_USER"
             validate_identifier strategy_name "$RUNTIME_STRATEGY"
             validate_identifier deployment_id "$RUNTIME_DEPLOYMENT"
-            validate_identifier legacy_config_id "$RUNTIME_LEGACY_CONFIG"
             validate_identifier account_id "$RUNTIME_ACCOUNT"
             validate_identifier connector_name "$RUNTIME_CONNECTOR"
-            validate_identifier provider "$RUNTIME_PROVIDER"
 
-            if ! docker inspect app >/dev/null 2>&1; then
-              echo 'App container is not running' >&2
-              exit 1
-            fi
-            if [ "$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app)" != healthy ]; then
+            if ! docker inspect app >/dev/null 2>&1 || \
+              [ "$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app)" != healthy ]
+            then
               echo 'App container is not healthy' >&2
               exit 1
             fi
-
             docker exec app cat /app/runtime-package-manifest.json
+
+            if [ "$RUNTIME_ACTION" = audit ]; then
+              for pattern in \
+                "users:$RUNTIME_USER:strategies:$RUNTIME_STRATEGY:release-seq" \
+                "users:$RUNTIME_USER:strategies:$RUNTIME_STRATEGY:releases:*" \
+                "users:$RUNTIME_USER:runtime:deployments:$RUNTIME_DEPLOYMENT" \
+                "users:$RUNTIME_USER:trading-accounts:$RUNTIME_ACCOUNT"
+              do
+                printf 'Keys matching %s:\n' "$pattern"
+                docker exec inv-redis redis-cli --scan --pattern "$pattern" |
+                  while IFS= read -r key; do
+                    [ -n "$key" ] || continue
+                    printf '%s [%s]\n' "$key" \
+                      "$(docker exec inv-redis redis-cli --raw TYPE "$key")"
+                  done
+              done
+              exit 0
+            fi
+
+            if [ "$RUNTIME_ACTION" = audit-backups ]; then
+              mapfile -t backups < <(
+                find "$HOME/backups/redis" -maxdepth 1 -type f \
+                  -name 'dump-*.rdb' | sort -r | head -n 5
+              )
+              [ "${#backups[@]}" -gt 0 ] || {
+                echo 'No Redis backups found' >&2
+                exit 1
+              }
+              audit_index=0
+              for backup in "${backups[@]}"; do
+                audit_index=$((audit_index + 1))
+                sha256sum --check "$backup.sha256"
+                audit_name="runtime-backup-audit-$$-$audit_index"
+                cleanup_audit() {
+                  docker rm -f "$audit_name" >/dev/null 2>&1 || true
+                }
+                docker run -d --name "$audit_name" --user 0 \
+                  -v "$backup:/data/dump.rdb:ro" \
+                  redis/redis-stack:7.4.0-v8 \
+                  redis-stack-server --dir /data --dbfilename dump.rdb \
+                  --appendonly no >/dev/null
+                audit_ready=false
+                for _attempt in $(seq 1 300); do
+                  if docker exec "$audit_name" redis-cli ping 2>/dev/null | grep -q PONG; then
+                    audit_ready=true
+                    break
+                  fi
+                  sleep 1
+                done
+                [ "$audit_ready" = true ] || {
+                  docker logs "$audit_name"
+                  cleanup_audit
+                  exit 1
+                }
+                printf 'Backup %s, DBSIZE=%s\n' \
+                  "$(basename "$backup")" \
+                  "$(docker exec "$audit_name" redis-cli --raw DBSIZE)"
+                for pattern in \
+                  "users:*:strategies:$RUNTIME_STRATEGY:release-seq" \
+                  "users:*:strategies:$RUNTIME_STRATEGY:releases:*" \
+                  "users:*:runtime:deployments:*" \
+                  "users:*:trading-accounts:*"
+                do
+                  docker exec "$audit_name" redis-cli --scan --pattern "$pattern" |
+                    while IFS= read -r key; do
+                      [ -n "$key" ] || continue
+                      printf '%s [%s]\n' "$key" \
+                        "$(docker exec "$audit_name" redis-cli --raw TYPE "$key")"
+                    done
+                done
+                cleanup_audit
+              done
+              exit 0
+            fi
 
             command=(
               ./node_modules/.bin/tradejs runtime-config "$RUNTIME_ACTION"
@@ -140,154 +198,11 @@ jobs:
               fi
             }
             trap cleanup_runtime_config EXIT
+
             case "$RUNTIME_ACTION" in
               verify)
                 ;;
-              audit)
-                for pattern in \
-                  "users:$RUNTIME_USER:strategies:$RUNTIME_STRATEGY:*" \
-                  "users:$RUNTIME_USER:runtime:deployments:*" \
-                  "users:$RUNTIME_USER:runtime:strategy-releases:$RUNTIME_STRATEGY:*" \
-                  "users:*:strategies:$RUNTIME_STRATEGY:*" \
-                  "users:*:runtime:deployments:*"
-                do
-                  printf 'Keys matching %s:\n' "$pattern"
-                  docker exec inv-redis redis-cli --scan --pattern "$pattern" |
-                    while IFS= read -r key; do
-                      [ -n "$key" ] || continue
-                      key_type="$(docker exec inv-redis redis-cli --raw TYPE "$key")"
-                      printf '%s [%s]\n' "$key" "$key_type"
-                    done
-                done
-                exit 0
-                ;;
-              audit-backups)
-                mapfile -t backups < <(
-                  find "$HOME/backups/redis" -maxdepth 1 -type f -name 'dump-*.rdb' |
-                    sort -r |
-                    head -n 5
-                )
-                if [ "${#backups[@]}" -eq 0 ]; then
-                  echo 'No Redis backups found' >&2
-                  exit 1
-                fi
-                audit_index=0
-                for backup in "${backups[@]}"; do
-                  audit_index=$((audit_index + 1))
-                  sha256sum --check "$backup.sha256"
-                  audit_name="runtime-backup-audit-$$-$audit_index"
-                  cleanup_backup_audit() {
-                    docker rm -f "$audit_name" >/dev/null 2>&1 || true
-                  }
-                  docker run -d --name "$audit_name" --user 0 \
-                    -v "$backup:/data/dump.rdb:ro" \
-                    redis/redis-stack:7.4.0-v8 \
-                    redis-stack-server --dir /data --dbfilename dump.rdb \
-                    --appendonly no >/dev/null
-                  audit_ready=false
-                  for _attempt in $(seq 1 300); do
-                    if docker exec "$audit_name" redis-cli ping | grep -q PONG; then
-                      audit_ready=true
-                      break
-                    fi
-                    sleep 1
-                  done
-                  if [ "$audit_ready" != true ]; then
-                    docker logs "$audit_name"
-                    cleanup_backup_audit
-                    exit 1
-                  fi
-                  printf 'Backup %s, DBSIZE=%s\n' \
-                    "$(basename "$backup")" \
-                    "$(docker exec "$audit_name" redis-cli --raw DBSIZE)"
-                  for pattern in \
-                    "users:*:strategies:$RUNTIME_STRATEGY:*" \
-                    "users:*:runtime:deployments:*" \
-                    "users:*:trading-accounts:*"
-                  do
-                    docker exec "$audit_name" redis-cli --scan --pattern "$pattern" |
-                      while IFS= read -r key; do
-                        [ -n "$key" ] || continue
-                        key_type="$(docker exec "$audit_name" redis-cli --raw TYPE "$key")"
-                        printf '%s [%s]\n' "$key" "$key_type"
-                      done
-                  done
-                  cleanup_backup_audit
-                done
-                exit 0
-                ;;
-              audit-storage)
-                current_volume="$(
-                  docker inspect --format='{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' inv-redis
-                )"
-                printf 'Current Redis volume: %s\n' "${current_volume:-<bind-mount>}"
-                mapfile -t redis_volumes < <(
-                  docker volume ls --format '{{.Name}}' | grep -i redis | sort -u || true
-                )
-                if [ "${#redis_volumes[@]}" -eq 0 ]; then
-                  echo 'No Redis-named Docker volumes found'
-                  exit 0
-                fi
-                storage_index=0
-                for volume_name in "${redis_volumes[@]}"; do
-                  storage_index=$((storage_index + 1))
-                  storage_dir="$(mktemp -d)"
-                  storage_name="runtime-storage-audit-$$-$storage_index"
-                  docker run --rm --user 0 --entrypoint sh \
-                    -v "$volume_name:/source:ro" \
-                    -v "$storage_dir:/destination" \
-                    redis/redis-stack:7.4.0-v8 \
-                    -c 'cp -a /source/. /destination/ && chmod -R ugo+rwX /destination'
-                  cleanup_storage_audit() {
-                    docker rm -f "$storage_name" >/dev/null 2>&1 || true
-                    rm -rf "$storage_dir"
-                  }
-                  docker run -d --name "$storage_name" --user 0 \
-                    -v "$storage_dir:/data" \
-                    redis/redis-stack:7.4.0-v8 \
-                    redis-stack-server --dir /data --dbfilename dump.rdb \
-                    --appendonly yes >/dev/null
-                  storage_ready=false
-                  for _attempt in $(seq 1 300); do
-                    if docker exec "$storage_name" redis-cli ping | grep -q PONG; then
-                      storage_ready=true
-                      break
-                    fi
-                    sleep 1
-                  done
-                  if [ "$storage_ready" != true ]; then
-                    printf 'Volume %s could not be loaded as Redis data\n' "$volume_name"
-                    docker logs "$storage_name" 2>&1 | tail -n 20
-                    cleanup_storage_audit
-                    continue
-                  fi
-                  printf 'Volume %s, DBSIZE=%s%s\n' \
-                    "$volume_name" \
-                    "$(docker exec "$storage_name" redis-cli --raw DBSIZE)" \
-                    "$([ "$volume_name" = "$current_volume" ] && printf ' (current)' || true)"
-                  for pattern in \
-                    "users:*:strategies:$RUNTIME_STRATEGY:*" \
-                    "users:*:runtime:deployments:*" \
-                    "users:*:trading-accounts:*"
-                  do
-                    docker exec "$storage_name" redis-cli --scan --pattern "$pattern" |
-                      while IFS= read -r key; do
-                        [ -n "$key" ] || continue
-                        key_type="$(docker exec "$storage_name" redis-cli --raw TYPE "$key")"
-                        printf '%s [%s]\n' "$key" "$key_type"
-                      done
-                  done
-                  cleanup_storage_audit
-                done
-                exit 0
-                ;;
-              restore-volume)
-                mutates=true
-                ;;
-              restore-account)
-                mutates=true
-                ;;
-              bootstrap | rollout)
+              provision | rollout)
                 mutates=true
                 if [ -z "$RUNTIME_CONFIG_BASE64" ] || \
                   [[ ! "$RUNTIME_CONFIG_BASE64" =~ ^[A-Za-z0-9+/=]+$ ]]
@@ -303,22 +218,15 @@ jobs:
                 docker exec app node -e \
                   'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' \
                   "$runtime_config_path"
-                command+=(
-                  --file "$runtime_config_path"
-                  --write
-                )
-                if [ "$RUNTIME_ACTION" = bootstrap ]; then
+                command+=(--file "$runtime_config_path" --write)
+                if [ "$RUNTIME_ACTION" = provision ]; then
                   command+=(
                     --account "$RUNTIME_ACCOUNT"
                     --connector "$RUNTIME_CONNECTOR"
-                    --provider "$RUNTIME_PROVIDER"
+                    --provider "$RUNTIME_CONNECTOR"
                     --label "$RUNTIME_DEPLOYMENT"
                   )
                 fi
-                ;;
-              migrate)
-                mutates=true
-                command+=(--config "$RUNTIME_LEGACY_CONFIG" --write)
                 ;;
               pause | resume)
                 mutates=true
@@ -338,170 +246,11 @@ jobs:
             esac
 
             if [ "$mutates" = true ]; then
-              if [ "$RUNTIME_CONFIRM_MUTATION" != true ]; then
+              [ "$RUNTIME_CONFIRM_MUTATION" = true ] || {
                 echo 'confirm_mutation must be enabled for a write operation' >&2
                 exit 1
-              fi
+              }
               ./scripts/redis-backup.sh --verify
-            fi
-
-            if [ "$RUNTIME_ACTION" = restore-volume ]; then
-              recovery_meta=""
-              recovery_persistent=""
-              while IFS= read -r candidate_meta; do
-                candidate_source_dir="$(
-                  sed -n 's/.*"sourceDir":"\([^"]*\)".*/\1/p' \
-                    "$candidate_meta"
-                )"
-                candidate_persistent="$(
-                  sed -n 's/.*"persistentKeyCount":\([0-9][0-9]*\).*/\1/p' \
-                    "$candidate_meta"
-                )"
-                if [ -n "$candidate_source_dir" ] && \
-                  [ "$candidate_source_dir" != /data ] && \
-                  [[ "$candidate_persistent" =~ ^[0-9]+$ ]] && \
-                  [ "$candidate_persistent" -gt 0 ]
-                then
-                  recovery_meta="$candidate_meta"
-                  recovery_persistent="$candidate_persistent"
-                  break
-                fi
-              done < <(
-                find "$HOME/backups/redis" -maxdepth 1 -type f \
-                  -name 'dump-*.rdb.meta.json' | sort -r
-              )
-              if [ -z "$recovery_meta" ]; then
-                echo 'No verified non-empty pre-volume Redis backup is available' >&2
-                exit 1
-              fi
-              recovery_backup="${recovery_meta%.meta.json}"
-              redis_volume_source="$(
-                docker inspect --format='{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' \
-                  inv-redis
-              )"
-              docker stop inv-redis >/dev/null
-              ./scripts/redis-volume-restore.sh \
-                "$recovery_backup" "$redis_volume_source" \
-                "$recovery_persistent" pre-manual-restore
-              docker compose --env-file .env --env-file release.env \
-                -f docker-compose.prod.yml up -d redis
-              recovery_ready=false
-              for _attempt in $(seq 1 150); do
-                if docker exec inv-redis redis-cli ping 2>/dev/null | grep -q PONG; then
-                  recovery_ready=true
-                  break
-                fi
-                sleep 2
-              done
-              if [ "$recovery_ready" != true ]; then
-                docker logs --tail 200 inv-redis
-                echo 'Restored Redis did not become ready' >&2
-                exit 1
-              fi
-              persistent_count_script="local cursor='0'; local count=0; repeat local result=redis.call('SCAN', cursor, 'COUNT', 1000); cursor=result[1]; for _, key in ipairs(result[2]) do if redis.call('PTTL', key) == -1 then count=count+1 end end until cursor == '0'; return count"
-              restored_persistent="$(
-                docker exec inv-redis redis-cli --raw EVAL \
-                  "$persistent_count_script" 0
-              )"
-              if [ "$restored_persistent" != "$recovery_persistent" ]; then
-                printf 'Restored Redis persistent-key mismatch: expected=%s actual=%s\n' \
-                  "$recovery_persistent" "$restored_persistent" >&2
-                exit 1
-              fi
-              release_sequence_key="users:$RUNTIME_USER:strategies:$RUNTIME_STRATEGY:release-seq"
-              deployment_key="users:$RUNTIME_USER:runtime:deployments:$RUNTIME_DEPLOYMENT"
-              legacy_key="users:$RUNTIME_USER:strategies:$RUNTIME_STRATEGY:$RUNTIME_LEGACY_CONFIG"
-              if [ "$(docker exec inv-redis redis-cli --raw EXISTS "$release_sequence_key")" != 1 ] || \
-                [ "$(docker exec inv-redis redis-cli --raw EXISTS "$deployment_key")" != 1 ] || \
-                ! docker exec inv-redis redis-cli --scan \
-                  --pattern "users:$RUNTIME_USER:strategies:$RUNTIME_STRATEGY:releases:*" | grep -q .
-              then
-                echo 'Restored Redis does not contain the versioned runtime binding' >&2
-                exit 1
-              fi
-              if [ "$(docker exec inv-redis redis-cli --raw EXISTS "$legacy_key")" != 0 ]; then
-                echo 'Restored Redis unexpectedly contains the mutable legacy config' >&2
-                exit 1
-              fi
-              ./scripts/redis-backup.sh --verify
-              printf 'Restored %s with %s persistent keys from %s\n' \
-                "$deployment_key" "$restored_persistent" \
-                "$(basename "$recovery_backup")"
-              exit 0
-            fi
-
-            if [ "$RUNTIME_ACTION" = restore-account ]; then
-              account_key="users:$RUNTIME_USER:trading-accounts:$RUNTIME_ACCOUNT"
-              if [ "$(docker exec inv-redis redis-cli --raw EXISTS "$account_key")" != 0 ]; then
-                echo 'Live trading account already exists; refusing to overwrite it' >&2
-                exit 1
-              fi
-              mapfile -t account_backups < <(
-                find "$HOME/backups/redis" -maxdepth 1 -type f -name 'dump-*.rdb' |
-                  sort -r |
-                  head -n 20
-              )
-              account_restored=false
-              account_restore_source=""
-              account_audit_index=0
-              for backup in "${account_backups[@]}"; do
-                [ -f "$backup.sha256" ] || continue
-                account_audit_index=$((account_audit_index + 1))
-                sha256sum --check "$backup.sha256"
-                account_audit_name="runtime-account-audit-$$-$account_audit_index"
-                cleanup_account_audit() {
-                  docker rm -f "$account_audit_name" >/dev/null 2>&1 || true
-                }
-                docker run -d --name "$account_audit_name" --user 0 \
-                  -v "$backup:/data/dump.rdb:ro" \
-                  redis/redis-stack:7.4.0-v8 \
-                  redis-stack-server --dir /data --dbfilename dump.rdb \
-                  --appendonly no >/dev/null
-                account_audit_ready=false
-                for _attempt in $(seq 1 300); do
-                  if docker exec "$account_audit_name" redis-cli ping 2>/dev/null | grep -q PONG; then
-                    account_audit_ready=true
-                    break
-                  fi
-                  sleep 1
-                done
-                if [ "$account_audit_ready" != true ]; then
-                  docker logs "$account_audit_name"
-                  cleanup_account_audit
-                  exit 1
-                fi
-                if [ "$(docker exec "$account_audit_name" redis-cli --raw EXISTS "$account_key")" = 1 ]; then
-                  if [ "$(docker exec "$account_audit_name" redis-cli --raw JSON.TYPE "$account_key")" != object ]; then
-                    cleanup_account_audit
-                    echo 'Archived trading account is not a RedisJSON object' >&2
-                    exit 1
-                  fi
-                  docker exec "$account_audit_name" redis-cli --raw JSON.GET "$account_key" |
-                    docker exec -i inv-redis redis-cli -x JSON.SET "$account_key" '$' >/dev/null
-                  account_restored=true
-                  account_restore_source="$(basename "$backup")"
-                  cleanup_account_audit
-                  break
-                fi
-                cleanup_account_audit
-              done
-              if [ "$account_restored" != true ]; then
-                echo 'Trading account was not found in retained Redis backups' >&2
-                exit 1
-              fi
-              if [ "$(docker exec inv-redis redis-cli --raw TYPE "$account_key")" != ReJSON-RL ] || \
-                [ "$(docker exec inv-redis redis-cli --raw JSON.TYPE "$account_key")" != object ]
-              then
-                echo 'Restored trading account failed RedisJSON validation' >&2
-                exit 1
-              fi
-              docker exec app ./node_modules/.bin/tradejs runtime-config verify \
-                --user "$RUNTIME_USER" \
-                --deployment "$RUNTIME_DEPLOYMENT"
-              ./scripts/redis-backup.sh --verify
-              printf 'Restored trading account %s from %s without exposing its value\n' \
-                "$account_key" "$account_restore_source"
-              exit 0
             fi
 
             docker exec app "${command[@]}"
