@@ -5,6 +5,7 @@ backup_root="${REDIS_BACKUP_DIR:-$HOME/backups/redis}"
 retention_days="${REDIS_BACKUP_RETENTION_DAYS:-14}"
 redis_image="redis/redis-stack:7.4.0-v8"
 redis_container="${REDIS_CONTAINER:-inv-redis}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_path="$backup_root/dump-$timestamp.rdb"
 persistent_count_script="local cursor='0'; local count=0; repeat local result=redis.call('SCAN', cursor, 'COUNT', 1000); cursor=result[1]; for _, key in ipairs(result[2]) do if redis.call('PTTL', key) == -1 then count=count+1 end end until cursor == '0'; return count"
@@ -131,18 +132,13 @@ if [ "$verify" = true ]; then
 fi
 
 if [ "$prepare_volume" = true ] && [ "$source_dir" != /data ]; then
-  volume_archive="/data/pre-canonical-$timestamp"
-  docker exec "$redis_container" mkdir -p "$volume_archive"
-  for volume_path in /data/dump.rdb /data/appendonly.aof /data/appendonlydir; do
-    if docker exec "$redis_container" test -e "$volume_path"; then
-      docker exec "$redis_container" mv "$volume_path" "$volume_archive/"
-    fi
-  done
-  docker cp "$backup_path" "$redis_container:/data/dump.rdb.next"
-  docker exec "$redis_container" chmod 644 /data/dump.rdb.next
-  docker exec "$redis_container" mv /data/dump.rdb.next /data/dump.rdb
-  printf 'Prepared canonical Redis volume snapshot from %s/%s\n' \
-    "$source_dir" "$source_dbfilename" >&2
+  volume_source="$(
+    docker inspect --format='{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' \
+      "$redis_container"
+  )"
+  "$script_dir/redis-volume-restore.sh" \
+    "$backup_path" "$volume_source" "$snapshot_persistent_keys" pre-canonical \
+    >&2
 fi
 
 printf '{"schema":"tradejs-redis-backup/v1","createdAt":"%s","dbSize":%s,"persistentKeyCount":%s,"sourceDir":"%s","sourceDbfilename":"%s"}\n' \

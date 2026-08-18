@@ -10,6 +10,7 @@ const backupWorkflow = read('.github/workflows/redis-backup.yml');
 const runtimeConfigWorkflow = read('.github/workflows/runtime-config.yml');
 const compose = read('docker-compose.prod.yml');
 const redisBackup = read('scripts/redis-backup.sh');
+const redisVolumeRestore = read('scripts/redis-volume-restore.sh');
 
 assert(
   workflow.includes('tradejs-project-image-published'),
@@ -144,7 +145,7 @@ assert(
     redisBackup.includes('/data/dump.rdb:ro') &&
     redisBackup.includes('--dir /data --dbfilename dump.rdb') &&
     redisBackup.includes('--prepare-volume') &&
-    redisBackup.includes('pre-canonical-') &&
+    redisBackup.includes('pre-canonical') &&
     redisBackup.includes('loaded no persistent keys') &&
     redisBackup.includes('tradejs-redis-backup/v1'),
   'Redis backup script does not save, checksum, and restore-drill the data',
@@ -152,8 +153,18 @@ assert(
 assert(
   workflow.includes('./scripts/redis-backup.sh --verify --prepare-volume') &&
     workflow.includes('Redis persistent-key mismatch after Compose update') &&
-    workflow.includes('redis_persistent_count_script'),
+    workflow.includes('redis_persistent_count_script') &&
+    workflow.includes('Recovered interrupted Redis volume migration') &&
+    workflow.includes('./scripts/redis-volume-restore.sh'),
   'Deploy does not migrate and verify Redis persistence before Compose updates',
+);
+assert(
+  redisVolumeRestore.includes('redis-check-rdb') &&
+    redisVolumeRestore.includes('CONFIG SET appendonly yes') &&
+    redisVolumeRestore.includes('aof_last_bgrewrite_status') &&
+    redisVolumeRestore.includes('volume restore persistent-key mismatch') &&
+    redisVolumeRestore.includes('SHUTDOWN NOSAVE'),
+  'Redis volume restore does not verify RDB, persistent keys, and durable AOF',
 );
 assert(
   workflow.includes('runtime-package-manifest.json') &&
