@@ -119,6 +119,7 @@ assert(
     runtimeConfigWorkflow.includes('./scripts/redis-backup.sh --verify') &&
     runtimeConfigWorkflow.includes('runtime-config verify') &&
     runtimeConfigWorkflow.includes('redis-cli --scan --pattern') &&
+    runtimeConfigWorkflow.includes('users:*:trading-accounts:*') &&
     runtimeConfigWorkflow.includes('$volume_name:/source:ro') &&
     runtimeConfigWorkflow.includes('config_base64') &&
     runtimeConfigWorkflow.includes('runtime_config_path="/tmp/') &&

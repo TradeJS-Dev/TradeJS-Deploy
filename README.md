@@ -78,7 +78,7 @@ verify` against the selected deployment. Migration converts the selected legacy
 `users:<user>:strategies:<Strategy>:<config>` value into the next immutable
 per-strategy `releaseVersion` and leaves new entries paused for inspection.
 `audit-backups` checksum-verifies the five newest RDB files and prints only
-their DBSIZE plus matching runtime key names/types. Restore drills require the
+their DBSIZE plus matching runtime/account key names and types. Restore drills require the
 snapshot to be newer than the previous `LASTSAVE`, pass `redis-check-rdb`,
 match its checksum, and load successfully in an isolated Redis. Live versus
 snapshot persistent-key/DBSIZE drift is reported for diagnostics because keys

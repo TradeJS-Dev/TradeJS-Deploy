@@ -201,7 +201,8 @@ jobs:
                     "$(docker exec "$audit_name" redis-cli --raw DBSIZE)"
                   for pattern in \
                     "users:*:strategies:$RUNTIME_STRATEGY:*" \
-                    "users:*:runtime:deployments:*"
+                    "users:*:runtime:deployments:*" \
+                    "users:*:trading-accounts:*"
                   do
                     docker exec "$audit_name" redis-cli --scan --pattern "$pattern" |
                       while IFS= read -r key; do
