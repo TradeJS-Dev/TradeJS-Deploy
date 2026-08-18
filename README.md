@@ -43,9 +43,11 @@ If `Copy deploy files to server` fails with `can't connect without a private SSH
 `PG_PASSWORD` is the application database credential. It is injected into both
 the app environment and Timescale; every rollout also updates the existing
 `app` role, so a persistent database volume does not retain the old checked-in
-password. Generate it as a URL-safe value without whitespace or line breaks
-(for example, `openssl rand -hex 32`) because it is transported through a
-Compose env file.
+password. An existing installation may bootstrap a missing repository secret
+from its current server-side `.env` without exposing the value, but a first
+deploy requires the secret. Generate it as a URL-safe value without whitespace
+or line breaks (for example, `openssl rand -hex 32`) because it is transported
+through a Compose env file.
 
 The research-agent SSH key must belong to a machine user that can read
 `TradeJS` and write every `TradeJS-Strategy-*` repository. Its GitHub token

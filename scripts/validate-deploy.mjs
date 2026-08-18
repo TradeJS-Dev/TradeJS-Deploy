@@ -38,8 +38,10 @@ assert(
 );
 assert(
   workflow.includes('DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}') &&
-    workflow.includes("printf 'PG_PASSWORD=%s\\n'"),
-  'Timescale password is not injected by Deploy',
+    workflow.includes("printf 'PG_PASSWORD=%s\\n'") &&
+    workflow.includes('.runtime-pg-password.env') &&
+    workflow.includes('PG_PASSWORD is missing from GitHub secrets'),
+  'Timescale password has no secret injection or server bootstrap path',
 );
 assert(
   !workflow.includes('AUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}') &&
