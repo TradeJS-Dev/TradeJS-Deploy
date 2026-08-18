@@ -29,6 +29,10 @@ on:
     types:
       - tradejs-project-image-published
 
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest

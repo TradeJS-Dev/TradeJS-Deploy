@@ -14,6 +14,12 @@ const appRollback = read('scripts/rollback-app.sh');
 const packageJson = JSON.parse(read('package.json'));
 
 assert(
+  workflow.includes('group: production-deploy') &&
+    workflow.includes('cancel-in-progress: false'),
+  'Production deploys must be serialized',
+);
+
+assert(
   workflow.includes('tradejs-project-image-published') &&
     !workflow.includes('tradejs-images-published'),
   'Deploy must accept only the immutable Project image event',
