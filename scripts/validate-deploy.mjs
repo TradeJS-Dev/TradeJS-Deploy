@@ -28,12 +28,17 @@ assert(
   workflow.includes('DEPLOY_NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}') &&
     workflow.includes("printf 'AUTH_SECRET=%s\\n'") &&
     workflow.includes('DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}') &&
-    workflow.includes("printf 'PG_PASSWORD=%s\\n'"),
+    workflow.includes("printf 'PG_PASSWORD=%s\\n'") &&
+    workflow.includes('DEPLOY_COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}') &&
+    workflow.includes("printf 'COINALYZE_API_KEY=%s\\n'") &&
+    workflow.includes('await updateUserRecord("root", { COINALYZE_API_KEY: apiKey })') &&
+    workflow.includes('Root Coinalyze credential is configured'),
   'Deploy secret injection is incomplete',
 );
 assert(
   !workflow.includes('AUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}') &&
-    !workflow.includes('PG_PASSWORD=${{ secrets.PG_PASSWORD }}'),
+    !workflow.includes('PG_PASSWORD=${{ secrets.PG_PASSWORD }}') &&
+    !workflow.includes('COINALYZE_API_KEY=${{ secrets.COINALYZE_API_KEY }}'),
   'Deploy interpolates secrets directly into its shell program',
 );
 assert(

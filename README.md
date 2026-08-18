@@ -41,6 +41,9 @@ from source and it does not depend directly on npm package publishing.
 - `PG_PASSWORD`
 - `AGENT_GITHUB_TOKEN`
 - `REDISINSIGHT_HTPASSWD`
+- `COINALYZE_API_KEY` — injected into the app and synchronized into the root
+  Redis user record after backup and health verification; the value is never
+  printed by the deploy workflow.
 
 If `Copy deploy files to server` fails with `can't connect without a private SSH key or password`,
 `SSH_KEY` is missing, empty, or does not match the server user.

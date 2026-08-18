@@ -49,6 +49,7 @@ jobs:
           PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
+          COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
         run: |
           missing=""
 
@@ -59,7 +60,8 @@ jobs:
             GIT_SSH_PRIVATE_KEY \
             NEXTAUTH_SECRET \
             AGENT_GITHUB_TOKEN \
-            REDISINSIGHT_HTPASSWD
+            REDISINSIGHT_HTPASSWD \
+            COINALYZE_API_KEY
           do
             eval "value=\${$name}"
             if [ -z "$value" ]; then
@@ -126,6 +128,7 @@ jobs:
           DEPLOY_NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
           DEPLOY_AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+          DEPLOY_COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
         run: |
           cp tradejs-project/deploy/runtime.env .env
           cat >> .env <<EOF
@@ -151,6 +154,7 @@ jobs:
             printf 'PG_PASSWORD=%s\n' "$DEPLOY_PG_PASSWORD" >> .env
           fi
           printf 'AGENT_GITHUB_TOKEN=%s\n' "$DEPLOY_AGENT_GITHUB_TOKEN" >> .env
+          printf 'COINALYZE_API_KEY=%s\n' "$DEPLOY_COINALYZE_API_KEY" >> .env
 
       - name: Create release update env
         run: |
@@ -401,6 +405,21 @@ jobs:
                 rollback_app
               fi
             fi
+
+            docker exec app node --input-type=module --eval '
+              const apiKey = String(process.env.COINALYZE_API_KEY ?? "").trim();
+              if (!apiKey) throw new Error("COINALYZE_API_KEY is missing in the app container");
+              const { getUserSettings, updateUserRecord } = await import("@tradejs/infra/userSettings");
+              const current = await getUserSettings("root");
+              if (current.COINALYZE_API_KEY !== apiKey) {
+                await updateUserRecord("root", { COINALYZE_API_KEY: apiKey });
+              }
+              const verified = await getUserSettings("root");
+              if (verified.COINALYZE_API_KEY !== apiKey) {
+                throw new Error("Failed to synchronize the root Coinalyze credential");
+              }
+              console.log("Root Coinalyze credential is configured");
+            '
 
             docker exec nginx nginx -t
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps
