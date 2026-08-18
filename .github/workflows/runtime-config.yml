@@ -113,7 +113,9 @@ jobs:
                 for pattern in \
                   "users:$RUNTIME_USER:strategies:$RUNTIME_STRATEGY:*" \
                   "users:$RUNTIME_USER:runtime:deployments:*" \
-                  "users:$RUNTIME_USER:runtime:strategy-releases:$RUNTIME_STRATEGY:*"
+                  "users:$RUNTIME_USER:runtime:strategy-releases:$RUNTIME_STRATEGY:*" \
+                  "users:*:strategies:$RUNTIME_STRATEGY:*" \
+                  "users:*:runtime:deployments:*"
                 do
                   printf 'Keys matching %s:\n' "$pattern"
                   docker exec inv-redis redis-cli --scan --pattern "$pattern" |
