@@ -1,0 +1,146 @@
+name: Runtime strategy config
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Read or mutate the versioned runtime strategy binding"
+        required: true
+        default: verify
+        type: choice
+        options:
+          - verify
+          - migrate
+          - pause
+          - resume
+          - rollback
+      user_name:
+        description: "Redis user namespace"
+        required: true
+        default: root
+        type: string
+      strategy_name:
+        description: "Registered strategy name"
+        required: true
+        default: DoubleTap
+        type: string
+      deployment_id:
+        description: "Runtime deployment id"
+        required: true
+        default: doubletap-forward
+        type: string
+      legacy_config_id:
+        description: "Legacy config id used only by migrate"
+        required: true
+        default: config
+        type: string
+      rollback_release:
+        description: "Positive releaseVersion used only by rollback"
+        required: false
+        type: string
+      confirm_mutation:
+        description: "Required for migrate, pause, resume, and rollback"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: production-runtime-config
+  cancel-in-progress: false
+
+jobs:
+  runtime-config:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      RUNTIME_ACTION: ${{ inputs.action }}
+      RUNTIME_USER: ${{ inputs.user_name }}
+      RUNTIME_STRATEGY: ${{ inputs.strategy_name }}
+      RUNTIME_DEPLOYMENT: ${{ inputs.deployment_id }}
+      RUNTIME_LEGACY_CONFIG: ${{ inputs.legacy_config_id }}
+      RUNTIME_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}
+      RUNTIME_CONFIRM_MUTATION: ${{ inputs.confirm_mutation }}
+    steps:
+      - name: Apply runtime config operation on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 20m
+          envs: RUNTIME_ACTION,RUNTIME_USER,RUNTIME_STRATEGY,RUNTIME_DEPLOYMENT,RUNTIME_LEGACY_CONFIG,RUNTIME_ROLLBACK_RELEASE,RUNTIME_CONFIRM_MUTATION
+          script: |
+            set -Eeuo pipefail
+            cd ~/
+
+            validate_identifier() {
+              local label="$1"
+              local value="$2"
+              if [[ ! "$value" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+                printf 'Invalid %s: %s\n' "$label" "$value" >&2
+                exit 1
+              fi
+            }
+
+            validate_identifier user_name "$RUNTIME_USER"
+            validate_identifier strategy_name "$RUNTIME_STRATEGY"
+            validate_identifier deployment_id "$RUNTIME_DEPLOYMENT"
+            validate_identifier legacy_config_id "$RUNTIME_LEGACY_CONFIG"
+
+            if ! docker inspect app >/dev/null 2>&1; then
+              echo 'App container is not running' >&2
+              exit 1
+            fi
+            if [ "$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app)" != healthy ]; then
+              echo 'App container is not healthy' >&2
+              exit 1
+            fi
+
+            docker exec app cat /app/runtime-package-manifest.json
+
+            command=(
+              ./node_modules/.bin/tradejs runtime-config "$RUNTIME_ACTION"
+              --user "$RUNTIME_USER"
+              --strategy "$RUNTIME_STRATEGY"
+              --deployment "$RUNTIME_DEPLOYMENT"
+            )
+            mutates=false
+            case "$RUNTIME_ACTION" in
+              verify)
+                ;;
+              migrate)
+                mutates=true
+                command+=(--config "$RUNTIME_LEGACY_CONFIG" --write)
+                ;;
+              pause | resume)
+                mutates=true
+                ;;
+              rollback)
+                mutates=true
+                if [[ ! "$RUNTIME_ROLLBACK_RELEASE" =~ ^[1-9][0-9]*$ ]]; then
+                  echo 'rollback_release must be a positive integer' >&2
+                  exit 1
+                fi
+                command+=(--release "$RUNTIME_ROLLBACK_RELEASE")
+                ;;
+              *)
+                echo "Unsupported runtime action: $RUNTIME_ACTION" >&2
+                exit 1
+                ;;
+            esac
+
+            if [ "$mutates" = true ]; then
+              if [ "$RUNTIME_CONFIRM_MUTATION" != true ]; then
+                echo 'confirm_mutation must be enabled for a write operation' >&2
+                exit 1
+              fi
+              ./scripts/redis-backup.sh --verify
+            fi
+
+            docker exec app "${command[@]}"
+
+            if [ "$mutates" = true ]; then
+              docker exec app ./node_modules/.bin/tradejs runtime-config verify \
+                --user "$RUNTIME_USER" \
+                --deployment "$RUNTIME_DEPLOYMENT"
+            fi

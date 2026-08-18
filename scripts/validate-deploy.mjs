@@ -7,6 +7,7 @@ const assert = (condition, message) => {
 
 const workflow = read('.github/workflows/deploy.yml');
 const backupWorkflow = read('.github/workflows/redis-backup.yml');
+const runtimeConfigWorkflow = read('.github/workflows/runtime-config.yml');
 const compose = read('docker-compose.prod.yml');
 const redisBackup = read('scripts/redis-backup.sh');
 
@@ -103,6 +104,19 @@ assert(
   backupWorkflow.includes('schedule:') &&
     backupWorkflow.includes('redis-backup.sh --verify'),
   'Redis backup restore drill is not scheduled',
+);
+assert(
+  runtimeConfigWorkflow.includes('environment: production') &&
+    runtimeConfigWorkflow.includes('confirm_mutation') &&
+    runtimeConfigWorkflow.includes('./scripts/redis-backup.sh --verify') &&
+    runtimeConfigWorkflow.includes('runtime-config verify'),
+  'Runtime config writes are not guarded by confirmation, backup, and verification',
+);
+assert(
+  runtimeConfigWorkflow.includes('runtime-package-manifest.json') &&
+    runtimeConfigWorkflow.includes('./node_modules/.bin/tradejs runtime-config') &&
+    !runtimeConfigWorkflow.includes('redis-cli JSON.SET'),
+  'Runtime config workflow bypasses the versioned CLI or package manifest',
 );
 assert(
   redisBackup.includes('BGSAVE') &&

@@ -64,6 +64,16 @@ Manual deploy supports overriding:
 
 `image_tag` and `project_sha` must be full immutable SHAs. After a strategy package changes, publish the strategy's next Redis `releaseVersion` and switch the deployment reference only after this image is healthy. If rollback is required, first point Redis back to the prior release (paused), then restore the previous image via `release.env.previous`.
 
+## Runtime strategy operations
+
+Use the manual `Runtime strategy config` workflow instead of editing RedisJSON
+directly. `verify` is read-only. `migrate`, `pause`, `resume`, and `rollback`
+require `confirm_mutation=true`; each write first creates a Redis backup and
+passes a restore drill, then runs `runtime-config verify` against the selected
+deployment. Migration converts the selected legacy
+`users:<user>:strategies:<Strategy>:<config>` value into the next immutable
+per-strategy `releaseVersion` and leaves new entries paused for inspection.
+
 ## Local Files
 
 - `.env` is generated in CI from repository secrets.
