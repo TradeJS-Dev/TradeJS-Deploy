@@ -115,7 +115,10 @@ assert(
     runtimeConfigWorkflow.includes('redis-cli --scan --pattern') &&
     runtimeConfigWorkflow.includes('$volume_name:/source:ro') &&
     runtimeConfigWorkflow.includes('config_base64') &&
-    runtimeConfigWorkflow.includes('bootstrap_config_path="/tmp/'),
+    runtimeConfigWorkflow.includes('runtime_config_path="/tmp/') &&
+    runtimeConfigWorkflow.includes('bootstrap | rollout') &&
+    runtimeConfigWorkflow.includes('RUNTIME_PROVIDER: ${{ inputs.connector_name }}') &&
+    runtimeConfigWorkflow.includes('--user 0'),
   'Runtime config writes are not guarded by confirmation, backup, and verification',
 );
 assert(
@@ -130,6 +133,10 @@ assert(
     redisBackup.includes('LASTSAVE') &&
     redisBackup.includes('redis-check-rdb') &&
     redisBackup.includes('PTTL') &&
+    redisBackup.includes('--user 0') &&
+    redisBackup.includes('/data/dump.rdb:ro') &&
+    redisBackup.includes('--dir /data --dbfilename dump.rdb') &&
+    redisBackup.includes('loaded no persistent keys') &&
     redisBackup.includes('tradejs-redis-backup/v1'),
   'Redis backup script does not save, checksum, and restore-drill the data',
 );

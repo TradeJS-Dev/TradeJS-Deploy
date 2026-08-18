@@ -45,12 +45,7 @@ on:
         default: bybit-default
         type: string
       connector_name:
-        description: "Connector name used only by bootstrap"
-        required: true
-        default: bybit
-        type: string
-      provider:
-        description: "Account provider used only by bootstrap"
+        description: "Connector and account provider used only by bootstrap"
         required: true
         default: bybit
         type: string
@@ -84,7 +79,7 @@ jobs:
       RUNTIME_LEGACY_CONFIG: ${{ inputs.legacy_config_id }}
       RUNTIME_ACCOUNT: ${{ inputs.account_id }}
       RUNTIME_CONNECTOR: ${{ inputs.connector_name }}
-      RUNTIME_PROVIDER: ${{ inputs.provider }}
+      RUNTIME_PROVIDER: ${{ inputs.connector_name }}
       RUNTIME_CONFIG_BASE64: ${{ inputs.config_base64 }}
       RUNTIME_ROLLBACK_RELEASE: ${{ inputs.rollback_release }}
       RUNTIME_CONFIRM_MUTATION: ${{ inputs.confirm_mutation }}
@@ -178,18 +173,17 @@ jobs:
                 for backup in "${backups[@]}"; do
                   audit_index=$((audit_index + 1))
                   sha256sum --check "$backup.sha256"
-                  audit_dir="$(mktemp -d)"
                   audit_name="runtime-backup-audit-$$-$audit_index"
-                  cp "$backup" "$audit_dir/dump.rdb"
                   cleanup_backup_audit() {
                     docker rm -f "$audit_name" >/dev/null 2>&1 || true
-                    rm -rf "$audit_dir"
                   }
-                  docker run -d --name "$audit_name" -v "$audit_dir:/data" \
+                  docker run -d --name "$audit_name" --user 0 \
+                    -v "$backup:/data/dump.rdb:ro" \
                     redis/redis-stack:7.4.0-v8 \
-                    redis-stack-server --appendonly no >/dev/null
+                    redis-stack-server --dir /data --dbfilename dump.rdb \
+                    --appendonly no >/dev/null
                   audit_ready=false
-                  for _attempt in $(seq 1 30); do
+                  for _attempt in $(seq 1 300); do
                     if docker exec "$audit_name" redis-cli ping | grep -q PONG; then
                       audit_ready=true
                       break
@@ -248,9 +242,10 @@ jobs:
                   docker run -d --name "$storage_name" --user 0 \
                     -v "$storage_dir:/data" \
                     redis/redis-stack:7.4.0-v8 \
-                    redis-stack-server --appendonly yes >/dev/null
+                    redis-stack-server --dir /data --dbfilename dump.rdb \
+                    --appendonly yes >/dev/null
                   storage_ready=false
-                  for _attempt in $(seq 1 30); do
+                  for _attempt in $(seq 1 300); do
                     if docker exec "$storage_name" redis-cli ping | grep -q PONG; then
                       storage_ready=true
                       break

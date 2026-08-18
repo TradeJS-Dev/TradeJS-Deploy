@@ -13,6 +13,8 @@ source_dbsize="$(docker exec inv-redis redis-cli --raw DBSIZE)"
 source_persistent_keys="$(
   docker exec inv-redis redis-cli --raw EVAL "$persistent_count_script" 0
 )"
+snapshot_dbsize="$source_dbsize"
+snapshot_persistent_keys="$source_persistent_keys"
 last_save_before="$(docker exec inv-redis redis-cli --raw LASTSAVE)"
 while [ "$(date +%s)" -le "$last_save_before" ]; do
   sleep 1
@@ -41,23 +43,22 @@ fi
 docker cp inv-redis:/data/dump.rdb "$backup_path.tmp"
 mv "$backup_path.tmp" "$backup_path"
 sha256sum "$backup_path" > "$backup_path.sha256"
-docker run --rm --entrypoint redis-check-rdb \
+docker run --rm --user 0 --entrypoint redis-check-rdb \
   -v "$backup_root:/backup:ro" \
   "$redis_image" "/backup/$(basename "$backup_path")" >/dev/null
 
 if [ "${1:-}" = "--verify" ]; then
-  drill_dir="$(mktemp -d)"
   drill_name="inv-redis-restore-drill-$timestamp"
   cleanup() {
     docker rm -f "$drill_name" >/dev/null 2>&1 || true
-    rm -rf "$drill_dir"
   }
   trap cleanup EXIT
-  cp "$backup_path" "$drill_dir/dump.rdb"
-  docker run -d --name "$drill_name" -v "$drill_dir:/data" "$redis_image" \
-    redis-stack-server --appendonly no >/dev/null
+  docker run -d --name "$drill_name" --user 0 \
+    -v "$backup_path:/data/dump.rdb:ro" "$redis_image" \
+    redis-stack-server --dir /data --dbfilename dump.rdb \
+    --appendonly no >/dev/null
   restored=false
-  for _attempt in $(seq 1 30); do
+  for _attempt in $(seq 1 "${REDIS_RESTORE_WAIT_ATTEMPTS:-300}"); do
     if docker exec "$drill_name" redis-cli ping | grep -q PONG; then
       restored=true
       break
@@ -73,6 +74,15 @@ if [ "${1:-}" = "--verify" ]; then
   restored_persistent_keys="$(
     docker exec "$drill_name" redis-cli --raw EVAL "$persistent_count_script" 0
   )"
+  snapshot_dbsize="$restored_dbsize"
+  snapshot_persistent_keys="$restored_persistent_keys"
+  if [ "$source_persistent_keys" -gt 0 ] && \
+    [ "$restored_persistent_keys" -eq 0 ]
+  then
+    printf 'Redis restore drill loaded no persistent keys from a non-empty source: source=%s (DBSIZE source=%s restored=%s)\n' \
+      "$source_persistent_keys" "$source_dbsize" "$restored_dbsize" >&2
+    exit 1
+  fi
   if [ "$restored_persistent_keys" != "$source_persistent_keys" ]; then
     printf 'Redis snapshot/live persistent-key drift: source=%s restored=%s (DBSIZE source=%s restored=%s)\n' \
       "$source_persistent_keys" "$restored_persistent_keys" \
@@ -81,7 +91,7 @@ if [ "${1:-}" = "--verify" ]; then
 fi
 
 printf '{"schema":"tradejs-redis-backup/v1","createdAt":"%s","dbSize":%s,"persistentKeyCount":%s}\n' \
-  "$timestamp" "$source_dbsize" "$source_persistent_keys" \
+  "$timestamp" "$snapshot_dbsize" "$snapshot_persistent_keys" \
   > "$backup_path.meta.json"
 
 find "$backup_root" -type f \( \
