@@ -103,7 +103,9 @@ a second independently configurable binding.
 `rollout` applies a secret-free config to an existing versioned deployment. It
 does nothing when the resolved config and package versions already match;
 otherwise it publishes the next per-strategy release and switches only the
-selected strategy pointer to that release in `entries_paused` state.
+selected strategy pointer to that release in `entries_paused` state. The daemon
+observes the changed binding on its next cycle and rebuilds the affected
+session; this workflow does not require or perform an app restart.
 `pause` and `resume` are the only UI-equivalent operational changes. `rollback`
 explicitly moves the deployment pointer to a requested earlier release and
 keeps entries paused; it never resolves a missing or invalid release
