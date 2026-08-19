@@ -12,6 +12,7 @@ on:
           - verify
           - audit
           - audit-backups
+          - signals-dry-run
           - pause
           - resume
           - cleanup-legacy
@@ -158,6 +159,15 @@ jobs:
             case "$RUNTIME_ACTION" in
               verify)
                 runtime_command verify
+                ;;
+              signals-dry-run)
+                docker exec app ./node_modules/.bin/tradejs signals \
+                  --user "$RUNTIME_USER" \
+                  --deployment "$RUNTIME_DEPLOYMENT" \
+                  --timeframe 15 \
+                  --skipScreenshots \
+                  --showSkipStats \
+                  --parallel 4
                 ;;
               pause | resume)
                 [ "$RUNTIME_CONFIRM_MUTATION" = true ] || {

@@ -79,7 +79,10 @@ assert(
     runtimeControlWorkflow.includes('./scripts/redis-backup.sh --verify') &&
     runtimeControlWorkflow.includes('runtime-control') &&
     runtimeControlWorkflow.includes('cleanup-legacy') &&
+    runtimeControlWorkflow.includes('signals-dry-run') &&
     runtimeControlWorkflow.includes('runtime-package-manifest.json') &&
+    runtimeControlWorkflow.includes('--showSkipStats') &&
+    !runtimeControlWorkflow.includes('signals \\\n                  --makeOrders') &&
     !runtimeControlWorkflow.includes('redis-cli JSON.SET'),
   'Runtime controls must use the Git-owned CLI after confirmation and backup',
 );
