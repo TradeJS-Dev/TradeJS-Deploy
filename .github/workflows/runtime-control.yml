@@ -1,0 +1,187 @@
+name: Runtime strategy control
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Verify, audit, pause/resume, or remove legacy runtime keys"
+        required: true
+        default: verify
+        type: choice
+        options:
+          - verify
+          - audit
+          - audit-backups
+          - pause
+          - resume
+          - cleanup-legacy
+      user_name:
+        description: "Redis user namespace"
+        required: true
+        default: root
+        type: string
+      strategy_name:
+        description: "Registered strategy name for pause/resume"
+        required: true
+        default: DoubleTap
+        type: string
+      deployment_id:
+        description: "Git-owned runtime deployment id"
+        required: true
+        default: production
+        type: string
+      confirm_mutation:
+        description: "Required for pause, resume, and legacy cleanup"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: production-runtime-control
+  cancel-in-progress: false
+
+jobs:
+  runtime-control:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      RUNTIME_ACTION: ${{ inputs.action }}
+      RUNTIME_USER: ${{ inputs.user_name }}
+      RUNTIME_STRATEGY: ${{ inputs.strategy_name }}
+      RUNTIME_DEPLOYMENT: ${{ inputs.deployment_id }}
+      RUNTIME_CONFIRM_MUTATION: ${{ inputs.confirm_mutation }}
+    steps:
+      - name: Apply runtime operation on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 20m
+          envs: RUNTIME_ACTION,RUNTIME_USER,RUNTIME_STRATEGY,RUNTIME_DEPLOYMENT,RUNTIME_CONFIRM_MUTATION
+          script: |
+            set -Eeuo pipefail
+            cd ~/
+
+            validate_identifier() {
+              local label="$1"
+              local value="$2"
+              if [[ ! "$value" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+                printf 'Invalid %s: %s\n' "$label" "$value" >&2
+                exit 1
+              fi
+            }
+
+            validate_identifier user_name "$RUNTIME_USER"
+            validate_identifier strategy_name "$RUNTIME_STRATEGY"
+            validate_identifier deployment_id "$RUNTIME_DEPLOYMENT"
+
+            if ! docker inspect app >/dev/null 2>&1 || \
+              [ "$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app)" != healthy ]
+            then
+              echo 'App container is not healthy' >&2
+              exit 1
+            fi
+            docker exec app cat /app/runtime-package-manifest.json
+
+            runtime_command() {
+              docker exec app ./node_modules/.bin/tradejs runtime-control "$@" \
+                --user "$RUNTIME_USER" \
+                --deployment "$RUNTIME_DEPLOYMENT"
+            }
+
+            if [ "$RUNTIME_ACTION" = audit ]; then
+              runtime_command inspect
+              for pattern in \
+                "users:$RUNTIME_USER:runtime:controls" \
+                "users:$RUNTIME_USER:runtime:deployments:*:heartbeat" \
+                "users:$RUNTIME_USER:runtime:strategy-control-events:*" \
+                "users:$RUNTIME_USER:trading-accounts:*"
+              do
+                printf 'Keys matching %s:\n' "$pattern"
+                docker exec inv-redis redis-cli --scan --pattern "$pattern" |
+                  while IFS= read -r key; do
+                    [ -n "$key" ] || continue
+                    printf '%s [%s]\n' "$key" \
+                      "$(docker exec inv-redis redis-cli --raw TYPE "$key")"
+                  done
+              done
+              ./scripts/cleanup-legacy-runtime-redis.sh \
+                --user "$RUNTIME_USER" --redis-container inv-redis
+              exit 0
+            fi
+
+            if [ "$RUNTIME_ACTION" = audit-backups ]; then
+              mapfile -t backups < <(
+                find "$HOME/backups/redis" -maxdepth 1 -type f \
+                  -name 'dump-*.rdb' | sort -r | head -n 5
+              )
+              [ "${#backups[@]}" -gt 0 ] || {
+                echo 'No Redis backups found' >&2
+                exit 1
+              }
+              audit_index=0
+              for backup in "${backups[@]}"; do
+                audit_index=$((audit_index + 1))
+                sha256sum --check "$backup.sha256"
+                audit_name="runtime-backup-audit-$$-$audit_index"
+                cleanup_audit() {
+                  docker rm -f "$audit_name" >/dev/null 2>&1 || true
+                }
+                trap cleanup_audit EXIT
+                docker run -d --name "$audit_name" --user 0 \
+                  -v "$backup:/data/dump.rdb:ro" \
+                  redis/redis-stack:7.4.0-v8 \
+                  redis-stack-server --dir /data --dbfilename dump.rdb \
+                  --appendonly no >/dev/null
+                audit_ready=false
+                for _attempt in $(seq 1 300); do
+                  if docker exec "$audit_name" redis-cli ping 2>/dev/null | grep -q PONG; then
+                    audit_ready=true
+                    break
+                  fi
+                  sleep 1
+                done
+                [ "$audit_ready" = true ] || {
+                  docker logs "$audit_name"
+                  exit 1
+                }
+                printf 'Backup %s, DBSIZE=%s\n' \
+                  "$(basename "$backup")" \
+                  "$(docker exec "$audit_name" redis-cli --raw DBSIZE)"
+                cleanup_audit
+                trap - EXIT
+              done
+              exit 0
+            fi
+
+            case "$RUNTIME_ACTION" in
+              verify)
+                runtime_command verify
+                ;;
+              pause | resume)
+                [ "$RUNTIME_CONFIRM_MUTATION" = true ] || {
+                  echo 'confirm_mutation must be enabled for pause/resume' >&2
+                  exit 1
+                }
+                ./scripts/redis-backup.sh --verify
+                runtime_command "$RUNTIME_ACTION" --strategy "$RUNTIME_STRATEGY"
+                runtime_command verify
+                ;;
+              cleanup-legacy)
+                [ "$RUNTIME_CONFIRM_MUTATION" = true ] || {
+                  echo 'confirm_mutation must be enabled for legacy cleanup' >&2
+                  exit 1
+                }
+                runtime_command verify
+                ./scripts/redis-backup.sh --verify
+                TRADEJS_CONFIRM_LEGACY_RUNTIME_CLEANUP=DELETE_LEGACY_RUNTIME_KEYS \
+                  ./scripts/cleanup-legacy-runtime-redis.sh --apply \
+                    --user "$RUNTIME_USER" --redis-container inv-redis
+                runtime_command verify
+                ;;
+              *)
+                echo "Unsupported runtime action: $RUNTIME_ACTION" >&2
+                exit 1
+                ;;
+            esac

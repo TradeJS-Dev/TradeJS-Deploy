@@ -17,7 +17,9 @@ from source and it does not depend directly on npm package publishing.
   runtime config from that exact Project revision.
 - The server pulls only tagged images and runs `docker compose`.
 - App tags and Project refs must be immutable commit SHAs; `latest` is rejected for app rollouts.
-- Every app image contains `/app/runtime-package-manifest.json`. Deploy stores and compares the old/new manifests so strategy package changes are explicit before a Redis release pointer is switched.
+- Every app image contains `/app/runtime-package-manifest.json`. Deploy stores
+  and compares old/new manifests so package changes are explicit alongside the
+  Git-owned runtime strategy version/config change.
 - Production Project images contain only exact stable npm versions. Beta packages
   are exercised in isolated production-like smoke containers; the weekly
   Project composition sync batches promoted `latest` packages into one image
@@ -71,22 +73,23 @@ Manual deploy supports overriding:
 - `agent_changed`
 - `ml_infer_changed`
 
-`image_tag` and `project_sha` must be full immutable SHAs. After a strategy package changes, publish the strategy's next Redis `releaseVersion` and switch the deployment reference only after this image is healthy. If rollback is required, first point Redis back to the prior release (paused), then restore the previous image via `release.env.previous`.
+`image_tag` and `project_sha` must be full immutable SHAs. Strategy package,
+full config, and per-strategy version changes are committed together in the
+Project revision. If rollback is required, optionally pause entries and restore
+the previous image via `release.env.previous`; there is no Redis release pointer.
 
 ## Runtime strategy operations
 
-Use the manual `Runtime strategy config` workflow instead of editing RedisJSON
-directly. The only strategy configuration source is the immutable
-`users:<user>:strategies:<Strategy>:releases:<releaseVersion>` document. A
-deployment stores only the selected `strategyName`, `releaseVersion`, and
-`controlState`; the application displays the resolved configuration as
-read-only. `verify` is read-only, while `audit` prints only matching Redis key
-names and types, never config values. `provision`, `rollout`, `pause`, `resume`,
-and `rollback` require `confirm_mutation=true`; each write first creates a Redis
-backup and passes a restore drill, then runs `runtime-config verify` against the
-selected deployment.
-`audit-backups` checksum-verifies the five newest RDB files and prints only
-their DBSIZE plus matching runtime/account key names and types. Restore drills require the
+Use the manual `Runtime strategy control` workflow. The only strategy
+configuration source is the exact Project image's `tradejs.config.ts`; the
+application displays it read-only. `verify` validates the declaration, installed
+package manifest, and server-owned account binding. `pause` and `resume` are the
+only routine mutations and affect only optional
+`users:<user>:runtime:controls` overrides. Each mutation requires
+`confirm_mutation=true`, creates a Redis backup, passes a restore drill, and
+re-runs `runtime-control verify`.
+`audit-backups` checksum-verifies the five newest RDB files and prints their
+DBSIZE without reading values. Restore drills require the
 snapshot to be newer than the previous `LASTSAVE`, pass `redis-check-rdb`,
 match its checksum, and load successfully in an isolated Redis. Live versus
 snapshot persistent-key/DBSIZE drift is reported for diagnostics because keys
@@ -101,22 +104,12 @@ large snapshots.
 If an incoming app is unhealthy, rollback reads the previous full-SHA image tag
 from the restored `release.env`, overrides any incoming tag still exported by
 the deploy shell, and force-recreates the app container.
-`provision` is the one-time operation for an absent deployment. It accepts a
-secret-free base64 JSON config, publishes release version 1, creates the
-deployment, and leaves new entries paused. Account credentials are never
-accepted by this workflow and must already exist through the authenticated
-account UI. The selected connector name is also the account provider, avoiding
-a second independently configurable binding.
-`rollout` applies a secret-free config to an existing versioned deployment. It
-does nothing when the resolved config and package versions already match;
-otherwise it publishes the next per-strategy release and switches only the
-selected strategy pointer to that release in `entries_paused` state. The daemon
-observes the changed binding on its next cycle and rebuilds the affected
-session; this workflow does not require or perform an app restart.
-`pause` and `resume` are the only UI-equivalent operational changes. `rollback`
-explicitly moves the deployment pointer to a requested earlier release and
-keeps entries paused; it never resolves a missing or invalid release
-automatically.
+`cleanup-legacy` is a one-time post-migration action. It first verifies the
+healthy Git-owned runtime, performs a verified backup/restore drill, inventories
+only key names/types, and deletes the allowlisted obsolete
+`users:<user>:strategies*` namespace plus old deployment documents. It preserves
+new deployment heartbeats, controls, control-event audit records, accounts,
+signals, evaluations, and trades. The backup is the recovery path.
 
 ## Local Files
 

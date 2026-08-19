@@ -7,10 +7,11 @@ const assert = (condition, message) => {
 
 const workflow = read('.github/workflows/deploy.yml');
 const backupWorkflow = read('.github/workflows/redis-backup.yml');
-const runtimeConfigWorkflow = read('.github/workflows/runtime-config.yml');
+const runtimeControlWorkflow = read('.github/workflows/runtime-control.yml');
 const compose = read('docker-compose.prod.yml');
 const redisBackup = read('scripts/redis-backup.sh');
 const appRollback = read('scripts/rollback-app.sh');
+const legacyCleanup = read('scripts/cleanup-legacy-runtime-redis.sh');
 const packageJson = JSON.parse(read('package.json'));
 
 assert(
@@ -73,14 +74,22 @@ assert(
   'Redis backup drill and post-Compose persistence checks are missing',
 );
 assert(
-  runtimeConfigWorkflow.includes('environment: production') &&
-    runtimeConfigWorkflow.includes('confirm_mutation') &&
-    runtimeConfigWorkflow.includes('./scripts/redis-backup.sh --verify') &&
-    runtimeConfigWorkflow.includes('runtime-config verify') &&
-    runtimeConfigWorkflow.includes('provision | rollout') &&
-    runtimeConfigWorkflow.includes('runtime-package-manifest.json') &&
-    !runtimeConfigWorkflow.includes('redis-cli JSON.SET'),
-  'Runtime writes must use the versioned CLI after confirmation and backup',
+  runtimeControlWorkflow.includes('environment: production') &&
+    runtimeControlWorkflow.includes('confirm_mutation') &&
+    runtimeControlWorkflow.includes('./scripts/redis-backup.sh --verify') &&
+    runtimeControlWorkflow.includes('runtime-control') &&
+    runtimeControlWorkflow.includes('cleanup-legacy') &&
+    runtimeControlWorkflow.includes('runtime-package-manifest.json') &&
+    !runtimeControlWorkflow.includes('redis-cli JSON.SET'),
+  'Runtime controls must use the Git-owned CLI after confirmation and backup',
+);
+assert(
+  legacyCleanup.includes('DELETE_LEGACY_RUNTIME_KEYS') &&
+    legacyCleanup.includes('redis-cli --raw UNLINK "$key"') &&
+    legacyCleanup.includes('[[ "$suffix" != *:* ]]') &&
+    !legacyCleanup.includes('FLUSHALL') &&
+    !legacyCleanup.includes('FLUSHDB'),
+  'Legacy cleanup must be explicit, allowlisted, and recoverable from backup',
 );
 
 for (const forbidden of [
@@ -94,7 +103,7 @@ for (const forbidden of [
   'pre-canonical',
 ]) {
   assert(
-    !runtimeConfigWorkflow.includes(forbidden) &&
+    !runtimeControlWorkflow.includes(forbidden) &&
       !workflow.includes(forbidden) &&
       !redisBackup.includes(forbidden),
     `Legacy runtime fallback remains: ${forbidden}`,

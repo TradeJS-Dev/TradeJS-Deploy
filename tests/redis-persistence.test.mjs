@@ -9,6 +9,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const backupScript = path.join(root, 'scripts/redis-backup.sh');
+const cleanupScript = path.join(
+  root,
+  'scripts/cleanup-legacy-runtime-redis.sh',
+);
 const image = 'redis/redis-stack:7.4.0-v8';
 
 const run = (command, args, options = {}) => {
@@ -48,7 +52,7 @@ test('rejects removed persistence migration arguments', () => {
   assert.match(result.stderr, /Unsupported redis-backup argument/);
 });
 
-test('preserves canonical runtime releases across backup and container recreation', async (t) => {
+test('preserves current runtime state and removes only legacy config keys', async (t) => {
   if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
     t.skip('Docker is unavailable');
     return;
@@ -89,15 +93,18 @@ test('preserves canonical runtime releases across backup and container recreatio
 
   startRedis();
   await waitForRedis(container);
-  const releaseKey = 'users:root:strategies:DoubleTap:releases:2';
-  const deploymentKey = 'users:root:runtime:deployments:doubletap-forward';
+  const legacyReleaseKey = 'users:root:strategies:DoubleTap:releases:2';
+  const legacyDeploymentKey =
+    'users:root:runtime:deployments:doubletap-forward';
   const accountKey = 'users:root:trading-accounts:bybit-default';
+  const controlsKey = 'users:root:runtime:controls';
+  const heartbeatKey = 'users:root:runtime:deployments:production:heartbeat';
   run('docker', [
     'exec',
     container,
     'redis-cli',
     'JSON.SET',
-    releaseKey,
+    legacyReleaseKey,
     '$',
     JSON.stringify({ releaseVersion: 2 }),
   ]);
@@ -106,17 +113,10 @@ test('preserves canonical runtime releases across backup and container recreatio
     container,
     'redis-cli',
     'JSON.SET',
-    deploymentKey,
+    legacyDeploymentKey,
     '$',
     JSON.stringify({
       id: 'doubletap-forward',
-      strategies: [
-        {
-          strategyName: 'DoubleTap',
-          releaseVersion: 2,
-          controlState: 'entries_paused',
-        },
-      ],
     }),
   ]);
   run('docker', [
@@ -127,6 +127,27 @@ test('preserves canonical runtime releases across backup and container recreatio
     accountKey,
     '$',
     JSON.stringify({ id: 'bybit-default', provider: 'bybit' }),
+  ]);
+  run('docker', [
+    'exec',
+    container,
+    'redis-cli',
+    'JSON.SET',
+    controlsKey,
+    '$',
+    JSON.stringify({
+      schema: 'tradejs-runtime-controls/v1',
+      deployments: {},
+    }),
+  ]);
+  run('docker', [
+    'exec',
+    container,
+    'redis-cli',
+    'JSON.SET',
+    heartbeatKey,
+    '$',
+    JSON.stringify({ deploymentId: 'production', status: 'healthy' }),
   ]);
 
   await new Promise((resolve, reject) => {
@@ -160,21 +181,82 @@ test('preserves canonical runtime releases across backup and container recreatio
   startRedis();
   await waitForRedis(container);
 
-  for (const key of [releaseKey, deploymentKey, accountKey]) {
+  for (const key of [
+    legacyReleaseKey,
+    legacyDeploymentKey,
+    accountKey,
+    controlsKey,
+    heartbeatKey,
+  ]) {
     assert.equal(
       run('docker', ['exec', container, 'redis-cli', '--raw', 'EXISTS', key]),
       '1',
     );
   }
-  assert.match(
+
+  const dryRun = run('bash', [
+    cleanupScript,
+    '--user',
+    'root',
+    '--redis-container',
+    container,
+  ]);
+  assert.match(dryRun, /Dry run only; no keys deleted/);
+  assert.equal(
     run('docker', [
       'exec',
       container,
       'redis-cli',
       '--raw',
-      'JSON.GET',
-      deploymentKey,
+      'EXISTS',
+      legacyReleaseKey,
     ]),
-    /entries_paused/,
+    '1',
   );
+
+  run(
+    'bash',
+    [
+      cleanupScript,
+      '--apply',
+      '--user',
+      'root',
+      '--redis-container',
+      container,
+    ],
+    {
+      env: {
+        ...process.env,
+        TRADEJS_CONFIRM_LEGACY_RUNTIME_CLEANUP:
+          'DELETE_LEGACY_RUNTIME_KEYS',
+      },
+    },
+  );
+
+  for (const key of [legacyReleaseKey, legacyDeploymentKey]) {
+    assert.equal(
+      run('docker', [
+        'exec',
+        container,
+        'redis-cli',
+        '--raw',
+        'EXISTS',
+        key,
+      ]),
+      '0',
+    );
+  }
+  for (const key of [accountKey, controlsKey, heartbeatKey]) {
+    assert.equal(
+      run('docker', [
+        'exec',
+        container,
+        'redis-cli',
+        '--raw',
+        'EXISTS',
+        key,
+      ]),
+      '1',
+    );
+  }
 });

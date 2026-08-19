@@ -32,6 +32,13 @@ persistent volumes, infrastructure containers, and server-only secrets.
 - Keep engine package publishing and ML inference implementation in `TradeJS`.
 - Reject any production Project image whose package manifest contains an npm
   prerelease; beta validation belongs to the isolated Project smoke flow.
+- Production deployment and full strategy config are read only from the exact
+  Project image's `tradejs.config.ts`. Redis may own trading accounts, optional
+  pause overrides, audit events, heartbeats, signals, and trades, but never
+  deployment/config/release documents.
+- Run legacy Redis cleanup only after the new app is healthy and
+  `runtime-control verify` succeeds. Require a verified backup/restore drill,
+  inventory key names/types, and delete only the cleanup script's allowlist.
 - Keep the research-agent image in `TradeJS`, but route strategy edits and pull
   requests to the standalone strategy repositories on their `main` branches.
 

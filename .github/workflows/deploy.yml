@@ -211,7 +211,8 @@ jobs:
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh releases scripts
             chmod +x ./init-cert.sh ./ensure-swap.sh \
-              ./scripts/redis-backup.sh ./scripts/rollback-app.sh
+              ./scripts/redis-backup.sh ./scripts/rollback-app.sh \
+              ./scripts/cleanup-legacy-runtime-redis.sh
             ./ensure-swap.sh
 
             if ! grep -q '^PG_PASSWORD=.' .env; then
