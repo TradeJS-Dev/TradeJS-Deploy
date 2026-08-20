@@ -7,6 +7,7 @@ const assert = (condition, message) => {
 
 const workflow = read('.github/workflows/deploy.yml');
 const backupWorkflow = read('.github/workflows/redis-backup.yml');
+const maintenanceWorkflow = read('.github/workflows/docker-maintenance.yml');
 const runtimeControlWorkflow = read('.github/workflows/runtime-control.yml');
 const compose = read('docker-compose.prod.yml');
 const redisBackup = read('scripts/redis-backup.sh');
@@ -16,7 +17,10 @@ const packageJson = JSON.parse(read('package.json'));
 
 assert(
   workflow.includes('group: production-deploy') &&
-    workflow.includes('cancel-in-progress: false'),
+    workflow.includes('cancel-in-progress: false') &&
+    workflow.includes('environment: production') &&
+    backupWorkflow.includes('environment: production') &&
+    maintenanceWorkflow.includes('environment: production'),
   'Production deploys must be serialized',
 );
 
@@ -48,6 +52,13 @@ assert(
     !workflow.includes('PG_PASSWORD=${{ secrets.PG_PASSWORD }}') &&
     !workflow.includes('COINALYZE_API_KEY=${{ secrets.COINALYZE_API_KEY }}'),
   'Deploy interpolates secrets directly into its shell program',
+);
+assert(
+  workflow.includes('            PG_PASSWORD \\\n') &&
+    !workflow.includes('Preserve existing server-owned database password') &&
+    !workflow.includes('.runtime-pg-password.env') &&
+    !workflow.includes('if [ -n "$DEPLOY_PG_PASSWORD" ]'),
+  'PG_PASSWORD must be required and injected without a server fallback',
 );
 assert(
   compose.includes('ghcr.io/tradejs-dev/tradejs-project-app:${APP_IMAGE_TAG}') &&

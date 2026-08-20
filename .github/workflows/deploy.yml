@@ -36,6 +36,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
     permissions:
       contents: read
 
@@ -63,6 +64,7 @@ jobs:
             SSH_KEY \
             GIT_SSH_PRIVATE_KEY \
             NEXTAUTH_SECRET \
+            PG_PASSWORD \
             AGENT_GITHUB_TOKEN \
             REDISINSIGHT_HTPASSWD \
             COINALYZE_API_KEY
@@ -154,9 +156,7 @@ jobs:
           EOF
           printf 'AUTH_SECRET=%s\n' "$DEPLOY_NEXTAUTH_SECRET" >> .env
           printf 'NEXTAUTH_SECRET=%s\n' "$DEPLOY_NEXTAUTH_SECRET" >> .env
-          if [ -n "$DEPLOY_PG_PASSWORD" ]; then
-            printf 'PG_PASSWORD=%s\n' "$DEPLOY_PG_PASSWORD" >> .env
-          fi
+          printf 'PG_PASSWORD=%s\n' "$DEPLOY_PG_PASSWORD" >> .env
           printf 'AGENT_GITHUB_TOKEN=%s\n' "$DEPLOY_AGENT_GITHUB_TOKEN" >> .env
           printf 'COINALYZE_API_KEY=%s\n' "$DEPLOY_COINALYZE_API_KEY" >> .env
 
@@ -175,20 +175,6 @@ jobs:
           REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
         run: |
           printf '%s\n' "$REDISINSIGHT_HTPASSWD" > nginx/.htpasswd
-
-      - name: Preserve existing server-owned database password
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            set -Eeuo pipefail
-            umask 077
-            : > ~/.runtime-pg-password.env
-            if [ -f ~/.env ]; then
-              grep '^PG_PASSWORD=.' ~/.env | tail -n 1 > ~/.runtime-pg-password.env || true
-            fi
 
       - name: Copy deploy files to server
         uses: appleboy/scp-action@v0.1.7
@@ -214,15 +200,6 @@ jobs:
               ./scripts/redis-backup.sh ./scripts/rollback-app.sh \
               ./scripts/cleanup-legacy-runtime-redis.sh
             ./ensure-swap.sh
-
-            if ! grep -q '^PG_PASSWORD=.' .env; then
-              if ! grep -q '^PG_PASSWORD=.' .runtime-pg-password.env; then
-                echo 'PG_PASSWORD is missing from GitHub secrets and the existing server env' >&2
-                exit 1
-              fi
-              cat .runtime-pg-password.env >> .env
-            fi
-            rm -f .runtime-pg-password.env
 
             cat > agent-ssh/id_ed25519 <<'EOF'
             ${{ secrets.GIT_SSH_PRIVATE_KEY }}

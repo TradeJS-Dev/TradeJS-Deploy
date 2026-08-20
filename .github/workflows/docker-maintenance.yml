@@ -12,6 +12,7 @@ jobs:
   prune-images:
     if: ${{ inputs.prune_images }}
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
       - name: Prune Docker images on server

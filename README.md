@@ -19,7 +19,7 @@ from source and it does not depend directly on npm package publishing.
 - App tags and Project refs must be immutable commit SHAs; `latest` is rejected for app rollouts.
 - Every app image contains `/app/runtime-package-manifest.json`. Deploy stores
   and compares old/new manifests so package changes are explicit alongside the
-  Git-owned runtime strategy version/config change.
+  Git-owned computed `strategyRevision` and `deploymentCompositionId` changes.
 - Production Project images contain only exact stable npm versions. Beta packages
   are exercised in isolated production-like smoke containers; the weekly
   Project composition sync batches promoted `latest` packages into one image
@@ -34,6 +34,11 @@ from source and it does not depend directly on npm package publishing.
   restart their containers.
 
 ## Required Secrets
+
+Store every value below in the protected `production` GitHub environment of
+`TradeJS-Deploy`, not in TradeJS, TradeJS-Project, package repositories, or
+repository-wide secrets. Deploy, backup, runtime-control, and maintenance jobs
+all bind that environment before reading credentials.
 
 - `SSH_HOST`
 - `SSH_USER`
@@ -53,7 +58,8 @@ If `Copy deploy files to server` fails with `can't connect without a private SSH
 `PG_PASSWORD` is the application database credential. It is injected into both
 the app environment and Timescale; every rollout also updates the existing
 `app` role, so a persistent database volume does not retain the old checked-in
-password. Every installation must provide the repository secret. Generate it
+password. Every installation must provide the `production` environment secret;
+the workflow never recovers it from an existing server `.env`. Generate it
 as a URL-safe value without whitespace
 or line breaks (for example, `openssl rand -hex 32`) because it is transported
 through a Compose env file.
@@ -73,10 +79,11 @@ Manual deploy supports overriding:
 - `agent_changed`
 - `ml_infer_changed`
 
-`image_tag` and `project_sha` must be full immutable SHAs. Strategy package,
-full config, and per-strategy version changes are committed together in the
-Project revision. If rollback is required, optionally pause entries and restore
-the previous image via `release.env.previous`; there is no Redis release pointer.
+`image_tag` and `project_sha` must be full immutable SHAs. Strategy packages and
+full config are committed together in the Project revision; runtime validation
+computes the strategy and deployment composition identifiers. If rollback is
+required, optionally pause entries and restore the previous image via
+`release.env.previous`; there is no Redis release pointer.
 
 ## Runtime strategy operations
 
@@ -113,7 +120,8 @@ signals, evaluations, and trades. The backup is the recovery path.
 
 ## Local Files
 
-- `.env` is generated in CI from repository secrets.
+- `.env` is generated in CI from `TradeJS-Deploy`'s protected `production`
+  environment secrets.
 - Non-secret app values come from `TradeJS-Project/deploy/runtime.env`.
 - `release.env` is persisted on the server as the current deployed image state.
 - `release-update.env` is generated in CI and only carries the incoming deploy delta.
