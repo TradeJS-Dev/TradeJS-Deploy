@@ -1,30 +1,12 @@
-name: Deploy
+name: Deploy Project app
+
 on:
   workflow_dispatch:
     inputs:
-      image_tag:
-        description: "Docker image tag to deploy"
-        required: true
-        type: string
       project_sha:
-        description: "TradeJS-Project Git ref owning runtime config"
+        description: Exact TradeJS-Project SHA and app image tag
         required: true
         type: string
-      app_changed:
-        description: "Redeploy app"
-        required: true
-        default: true
-        type: boolean
-      agent_changed:
-        description: "Redeploy agent"
-        required: true
-        default: true
-        type: boolean
-      ml_infer_changed:
-        description: "Redeploy ml-infer"
-        required: true
-        default: true
-        type: boolean
   repository_dispatch:
     types:
       - tradejs-project-image-published
@@ -40,103 +22,63 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout
+      - name: Checkout Deploy
         uses: actions/checkout@v6
 
-      - name: Validate required secrets
+      - name: Resolve immutable Project release
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PROJECT_SHA: ${{ inputs.project_sha }}
+          PAYLOAD_PROJECT_SHA: ${{ github.event.client_payload.project_sha }}
+        run: |
+          if [ "$EVENT_NAME" = repository_dispatch ]; then
+            project_sha="$PAYLOAD_PROJECT_SHA"
+          else
+            project_sha="$INPUT_PROJECT_SHA"
+          fi
+          if [ "${#project_sha}" -ne 40 ] || printf '%s' "$project_sha" | grep -q '[^0-9a-f]'; then
+            echo 'Project SHA must be a full lowercase Git SHA' >&2
+            exit 1
+          fi
+          echo "project_sha=$project_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Validate app rollout secrets
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_KEY: ${{ secrets.SSH_KEY }}
-          GIT_SSH_PRIVATE_KEY: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
-          REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
           COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
         run: |
           missing=""
-
-          for name in \
-            SSH_HOST \
-            SSH_USER \
-            SSH_KEY \
-            GIT_SSH_PRIVATE_KEY \
-            NEXTAUTH_SECRET \
-            PG_PASSWORD \
-            AGENT_GITHUB_TOKEN \
-            REDISINSIGHT_HTPASSWD \
-            COINALYZE_API_KEY
-          do
+          for name in SSH_HOST SSH_USER SSH_KEY NEXTAUTH_SECRET PG_PASSWORD AGENT_GITHUB_TOKEN COINALYZE_API_KEY; do
             eval "value=\${$name}"
-            if [ -z "$value" ]; then
-              missing="$missing $name"
-            fi
+            [ -n "$value" ] || missing="$missing $name"
           done
-
-          if [ -n "$missing" ]; then
+          [ -z "$missing" ] || {
             echo "Missing required GitHub Actions secrets:$missing" >&2
             exit 1
-          fi
+          }
 
-      - name: Resolve release inputs
-        id: release
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
-          INPUT_PROJECT_SHA: ${{ inputs.project_sha }}
-          INPUT_APP_CHANGED: ${{ inputs.app_changed }}
-          INPUT_AGENT_CHANGED: ${{ inputs.agent_changed }}
-          INPUT_ML_INFER_CHANGED: ${{ inputs.ml_infer_changed }}
-          PAYLOAD_IMAGE_TAG: ${{ github.event.client_payload.image_tag }}
-          PAYLOAD_PROJECT_SHA: ${{ github.event.client_payload.project_sha }}
-          PAYLOAD_APP_CHANGED: ${{ github.event.client_payload.app_changed }}
-          PAYLOAD_AGENT_CHANGED: ${{ github.event.client_payload.agent_changed }}
-          PAYLOAD_ML_INFER_CHANGED: ${{ github.event.client_payload.ml_infer_changed }}
-        run: |
-          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
-            resolved_image_tag="$PAYLOAD_IMAGE_TAG"
-            resolved_project_sha="$PAYLOAD_PROJECT_SHA"
-            resolved_app_changed="$PAYLOAD_APP_CHANGED"
-            resolved_agent_changed="$PAYLOAD_AGENT_CHANGED"
-            resolved_ml_infer_changed="$PAYLOAD_ML_INFER_CHANGED"
-          else
-            resolved_image_tag="$INPUT_IMAGE_TAG"
-            resolved_project_sha="$INPUT_PROJECT_SHA"
-            resolved_app_changed="$INPUT_APP_CHANGED"
-            resolved_agent_changed="$INPUT_AGENT_CHANGED"
-            resolved_ml_infer_changed="$INPUT_ML_INFER_CHANGED"
-          fi
-          if [ "${#resolved_image_tag}" -ne 40 ] || printf '%s' "$resolved_image_tag" | grep -q '[^0-9a-f]'; then
-            echo "App image tag must be a full commit SHA" >&2
-            exit 1
-          fi
-          if [ "${#resolved_project_sha}" -ne 40 ] || printf '%s' "$resolved_project_sha" | grep -q '[^0-9a-f]'; then
-            echo "TradeJS-Project ref must be a full commit SHA" >&2
-            exit 1
-          fi
-          echo "image_tag=$resolved_image_tag" >> "$GITHUB_OUTPUT"
-          echo "project_sha=$resolved_project_sha" >> "$GITHUB_OUTPUT"
-          echo "app_changed=$resolved_app_changed" >> "$GITHUB_OUTPUT"
-          echo "agent_changed=$resolved_agent_changed" >> "$GITHUB_OUTPUT"
-          echo "ml_infer_changed=$resolved_ml_infer_changed" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout immutable TradeJS project config
+      - name: Checkout immutable TradeJS Project
         uses: actions/checkout@v6
         with:
           repository: TradeJS-Dev/TradeJS-Project
           ref: ${{ steps.release.outputs.project_sha }}
           path: tradejs-project
 
-      - name: Create app env from TradeJS-Project
+      - name: Build incoming runtime environment
         env:
           DEPLOY_NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
           DEPLOY_AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           DEPLOY_COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
         run: |
-          cp tradejs-project/deploy/runtime.env .env
-          cat >> .env <<EOF
+          cp tradejs-project/deploy/runtime.env runtime.env.incoming
+          cat >> runtime.env.incoming <<'EOF'
           APP_MEMORY_LIMIT=5g
           AGENT_MEMORY_LIMIT=4g
           SITE_MEMORY_LIMIT=512m
@@ -153,239 +95,103 @@ jobs:
           AGENT_GITHUB_ORGANIZATION=TradeJS-Dev
           AGENT_GITHUB_BASE_BRANCH=main
           EOF
-          printf 'AUTH_SECRET=%s\n' "$DEPLOY_NEXTAUTH_SECRET" >> .env
-          printf 'NEXTAUTH_SECRET=%s\n' "$DEPLOY_NEXTAUTH_SECRET" >> .env
-          printf 'PG_PASSWORD=%s\n' "$DEPLOY_PG_PASSWORD" >> .env
-          printf 'AGENT_GITHUB_TOKEN=%s\n' "$DEPLOY_AGENT_GITHUB_TOKEN" >> .env
-          printf 'COINALYZE_API_KEY=%s\n' "$DEPLOY_COINALYZE_API_KEY" >> .env
+          printf 'AUTH_SECRET=%s\n' "$DEPLOY_NEXTAUTH_SECRET" >> runtime.env.incoming
+          printf 'NEXTAUTH_SECRET=%s\n' "$DEPLOY_NEXTAUTH_SECRET" >> runtime.env.incoming
+          printf 'PG_PASSWORD=%s\n' "$DEPLOY_PG_PASSWORD" >> runtime.env.incoming
+          printf 'AGENT_GITHUB_TOKEN=%s\n' "$DEPLOY_AGENT_GITHUB_TOKEN" >> runtime.env.incoming
+          printf 'COINALYZE_API_KEY=%s\n' "$DEPLOY_COINALYZE_API_KEY" >> runtime.env.incoming
 
-      - name: Create release update env
-        run: |
-          cat > release-update.env <<EOF
-          DEPLOY_IMAGE_TAG=${{ steps.release.outputs.image_tag }}
-          PROJECT_SHA=${{ steps.release.outputs.project_sha }}
-          APP_CHANGED=${{ steps.release.outputs.app_changed }}
-          AGENT_CHANGED=${{ steps.release.outputs.agent_changed }}
-          ML_INFER_CHANGED=${{ steps.release.outputs.ml_infer_changed }}
-          EOF
-
-      - name: Create nginx htpasswd
-        env:
-          REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
-        run: |
-          printf '%s\n' "$REDISINSIGHT_HTPASSWD" > nginx/.htpasswd
-
-      - name: Copy deploy files to server
+      - name: Copy app rollout files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: ".env,release-update.env,docker-compose.prod.yml,nginx,sql,certbot,scripts,init-cert.sh,ensure-swap.sh"
+          source: "runtime.env.incoming,docker-compose.prod.yml,scripts"
           target: ~/
 
-      - name: Deploy on server
+      - name: Deploy exact Project app
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_PROJECT_SHA: ${{ steps.release.outputs.project_sha }}
+          DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 30m
+          envs: DEPLOY_PROJECT_SHA,DEPLOY_PG_PASSWORD
           script: |
-            set -e
+            set -Eeuo pipefail
             cd ~/
-            mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh releases scripts
-            chmod +x ./init-cert.sh ./ensure-swap.sh \
-              ./scripts/redis-backup.sh ./scripts/rollback-app.sh \
-              ./scripts/cleanup-legacy-runtime-redis.sh
-            ./ensure-swap.sh
+            chmod +x ./scripts/release-state.sh ./scripts/redis-backup.sh ./scripts/rollback-app.sh
 
-            cat > agent-ssh/id_ed25519 <<'EOF'
-            ${{ secrets.GIT_SSH_PRIVATE_KEY }}
-            EOF
-            chmod 700 agent-ssh
-            chmod 600 agent-ssh/id_ed25519
-            ssh-keyscan github.com > agent-ssh/known_hosts
-            chmod 644 agent-ssh/known_hosts
-
-            GIT_SSH_COMMAND="ssh -i ~/agent-ssh/id_ed25519 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/agent-ssh/known_hosts"
-
-            if ! GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git -C ~/tradejs-agent-repo rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-              rm -rf ~/tradejs-agent-repo
-              GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git clone git@github.com:TradeJS-Dev/TradeJS.git ~/tradejs-agent-repo
-            fi
-
-            GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git -C ~/tradejs-agent-repo fetch origin stable
-            git -C ~/tradejs-agent-repo checkout stable
-            git -C ~/tradejs-agent-repo reset --hard origin/stable
-
-            export $(grep -v '^#' .env | xargs)
-            if [ -f release.env ]; then
-              export $(grep -v '^#' release.env | xargs)
-            fi
-            export $(grep -v '^#' release-update.env | xargs)
-
-            had_previous_release=false
-            if [ -f release.env ]; then
-              cp release.env release.env.previous
-              had_previous_release=true
-            fi
-            if [ ! -f release.env ]; then
-              APP_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
-              AGENT_IMAGE_TAG=latest
-              ML_INFER_IMAGE_TAG=latest
-            fi
-
-            if [ "$APP_CHANGED" = "true" ]; then
-              APP_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
-            fi
-            if [ "$AGENT_CHANGED" = "true" ]; then
-              AGENT_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
-            fi
-            if [ "$ML_INFER_CHANGED" = "true" ]; then
-              ML_INFER_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
-            fi
-
-            cat > release.env <<EOF
-            APP_IMAGE_TAG=$APP_IMAGE_TAG
-            PROJECT_SHA=$PROJECT_SHA
-            AGENT_IMAGE_TAG=$AGENT_IMAGE_TAG
-            ML_INFER_IMAGE_TAG=$ML_INFER_IMAGE_TAG
-            APP_CHANGED=$APP_CHANGED
-            AGENT_CHANGED=$AGENT_CHANGED
-            ML_INFER_CHANGED=$ML_INFER_CHANGED
-            EOF
-
-            CHANGED_SERVICES=""
-            [ "$APP_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES app"
-            [ "$AGENT_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES agent"
-            [ "$ML_INFER_CHANGED" = "true" ] && CHANGED_SERVICES="$CHANGED_SERVICES ml-infer"
-
-            if [ -n "$CHANGED_SERVICES" ]; then
-              docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull $CHANGED_SERVICES
-            fi
-
-            if [ "$APP_CHANGED" = "true" ]; then
-              previous_manifest="releases/runtime-package-manifest-previous.json"
-              incoming_manifest="releases/runtime-package-manifest-$PROJECT_SHA.json"
-              manifest_diff="releases/runtime-package-diff-$PROJECT_SHA.json"
-              if ! docker cp app:/app/runtime-package-manifest.json "$previous_manifest" >/dev/null 2>&1; then
-                printf '{"packages":{}}\n' > "$previous_manifest"
-              fi
-              short_project_sha="$(printf '%s' "$PROJECT_SHA" | cut -c1-12)"
-              incoming_container="runtime-manifest-$short_project_sha"
-              docker rm -f "$incoming_container" >/dev/null 2>&1 || true
-              docker create --name "$incoming_container" "ghcr.io/tradejs-dev/tradejs-project-app:$APP_IMAGE_TAG" >/dev/null
-              docker cp "$incoming_container:/app/runtime-package-manifest.json" "$incoming_manifest"
-              docker rm "$incoming_container" >/dev/null
-              docker run --rm --entrypoint node -v "$HOME:/deploy" \
-                "ghcr.io/tradejs-dev/tradejs-project-app:$APP_IMAGE_TAG" \
-                /deploy/scripts/compare-runtime-manifests.mjs \
-                "/deploy/$previous_manifest" "/deploy/$incoming_manifest" "/deploy/$manifest_diff"
-            fi
-
-            redis_persistent_count_script="local cursor='0'; local count=0; repeat local result=redis.call('SCAN', cursor, 'COUNT', 1000); cursor=result[1]; for _, key in ipairs(result[2]) do if redis.call('PTTL', key) == -1 then count=count+1 end end until cursor == '0'; return count"
-            redis_was_running=false
-            redis_dbsize_before=""
-            redis_persistent_before=""
-            if docker inspect inv-redis >/dev/null 2>&1; then
-              redis_was_running=true
-              redis_dbsize_before="$(docker exec inv-redis redis-cli --raw DBSIZE)"
-              redis_persistent_before="$(
-                docker exec inv-redis redis-cli --raw EVAL \
-                  "$redis_persistent_count_script" 0
-              )"
-              ./scripts/redis-backup.sh --verify
-            fi
-
-            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis site docs certbot certbot-cron
-
-            redis_ready=false
-            for attempt in $(seq 1 150); do
-              if docker exec inv-redis redis-cli ping 2>/dev/null | grep -q PONG; then
-                redis_ready=true
-                break
-              fi
-              sleep 2
-            done
-            if [ "$redis_ready" != true ]; then
-              docker logs --tail 200 inv-redis
-              echo 'Redis did not become ready' >&2
-              exit 1
-            fi
-
-            if [ "$redis_was_running" != "true" ]; then
-              ./scripts/redis-backup.sh --verify
-            else
-              redis_dbsize_after="$(docker exec inv-redis redis-cli --raw DBSIZE)"
-              redis_persistent_after="$(
-                docker exec inv-redis redis-cli --raw EVAL \
-                  "$redis_persistent_count_script" 0
-              )"
-              if [ "$redis_persistent_after" != "$redis_persistent_before" ]; then
-                printf 'Redis persistent-key mismatch after Compose update: before=%s after=%s (DBSIZE before=%s after=%s)\n' \
-                  "$redis_persistent_before" "$redis_persistent_after" \
-                  "$redis_dbsize_before" "$redis_dbsize_after" >&2
-                exit 1
-              fi
-              printf 'Redis persistence verified after Compose update: persistent=%s DBSIZE before=%s after=%s\n' \
-                "$redis_persistent_after" "$redis_dbsize_before" "$redis_dbsize_after"
-            fi
-
-            timescale_ready=false
-            for attempt in $(seq 1 30); do
-              if docker exec inv-timescale pg_isready -U app -d app >/dev/null 2>&1; then
-                timescale_ready=true
-                break
-              fi
-              sleep 2
-            done
-            if [ "$timescale_ready" != "true" ]; then
-              docker logs --tail 200 inv-timescale
-              echo "Timescale did not become ready" >&2
-              exit 1
-            fi
-
-            escaped_pg_password="$(printf '%s' "$PG_PASSWORD" | sed "s/'/''/g")"
-            printf "ALTER ROLE app WITH PASSWORD '%s';\n" "$escaped_pg_password" |
-              docker exec -i inv-timescale psql -v ON_ERROR_STOP=1 -U app -d app
-            unset escaped_pg_password
-
-            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d --no-deps nginx
-
-            if [ -n "$CHANGED_SERVICES" ]; then
-              docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d $CHANGED_SERVICES
-            fi
-
-            docker restart nginx
-
-            if [ "$APP_CHANGED" = "true" ]; then
-              rollback_app() {
-                if [ "$had_previous_release" = "true" ] && [ -f release.env.previous ]; then
-                  cp release.env.previous release.env
-                  ./scripts/rollback-app.sh
-                fi
+            RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
+            for container in inv-redis inv-timescale ml-infer nginx; do
+              docker inspect "$container" >/dev/null 2>&1 || {
+                echo "Required production container is missing: $container" >&2
                 exit 1
               }
-              app_health=""
-              for attempt in $(seq 1 30); do
-                app_health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app)"
-                if [ "$app_health" = "healthy" ]; then
-                  break
-                fi
-                if [ "$app_health" = "unhealthy" ]; then
-                  docker logs --tail 200 app
-                  rollback_app
-                fi
-                sleep 5
-              done
+            done
+            docker exec inv-redis redis-cli ping | grep -q PONG
+            docker exec inv-timescale pg_isready -U app -d app
 
-              if [ "$app_health" != "healthy" ]; then
-                docker logs --tail 200 app
-                echo "App did not become healthy: $app_health" >&2
-                rollback_app
-              fi
+            cp release.env release.env.previous
+            cp .env .env.previous
+            rollback_app() {
+              cp release.env.previous release.env
+              cp .env.previous .env
+              RELEASE_ENV_FILE=release.env ./scripts/rollback-app.sh || true
+              exit 1
+            }
+
+            mv runtime.env.incoming .env || rollback_app
+            RELEASE_STATE_FILE=release.env ./scripts/release-state.sh update app "$DEPLOY_PROJECT_SHA" "$DEPLOY_PROJECT_SHA" || rollback_app
+
+            ./scripts/redis-backup.sh --verify || rollback_app
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull app || rollback_app
+
+            previous_manifest="releases/runtime-package-manifest-previous.json"
+            incoming_manifest="releases/runtime-package-manifest-$DEPLOY_PROJECT_SHA.json"
+            manifest_diff="releases/runtime-package-diff-$DEPLOY_PROJECT_SHA.json"
+            mkdir -p releases
+            if ! docker cp app:/app/runtime-package-manifest.json "$previous_manifest" >/dev/null 2>&1; then
+              printf '{"packages":{}}\n' > "$previous_manifest"
             fi
+            incoming_container="runtime-manifest-${DEPLOY_PROJECT_SHA:0:12}"
+            docker rm -f "$incoming_container" >/dev/null 2>&1 || true
+            docker create --name "$incoming_container" "ghcr.io/tradejs-dev/tradejs-project-app:$DEPLOY_PROJECT_SHA" >/dev/null ||
+              rollback_app
+            docker cp "$incoming_container:/app/runtime-package-manifest.json" "$incoming_manifest" ||
+              rollback_app
+            docker rm "$incoming_container" >/dev/null
+            docker run --rm --entrypoint node -v "$HOME:/deploy" "ghcr.io/tradejs-dev/tradejs-project-app:$DEPLOY_PROJECT_SHA" /deploy/scripts/compare-runtime-manifests.mjs "/deploy/$previous_manifest" "/deploy/$incoming_manifest" "/deploy/$manifest_diff" ||
+              rollback_app
+
+            escaped_pg_password="$(printf '%s' "$DEPLOY_PG_PASSWORD" | sed "s/'/''/g")"
+            printf "ALTER ROLE app WITH PASSWORD '%s';\n" "$escaped_pg_password" |
+              docker exec -i inv-timescale psql -v ON_ERROR_STOP=1 -U app -d app ||
+              rollback_app
+            unset escaped_pg_password
+
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d --no-deps --force-recreate app ||
+              rollback_app
+
+            app_health=""
+            for _attempt in $(seq 1 30); do
+              app_health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app)"
+              [ "$app_health" = healthy ] && break
+              [ "$app_health" != unhealthy ] || {
+                docker logs --tail 200 app
+                rollback_app
+              }
+              sleep 5
+            done
+            [ "$app_health" = healthy ] || {
+              docker logs --tail 200 app
+              echo "App did not become healthy: $app_health" >&2
+              rollback_app
+            }
 
             docker exec app node --input-type=module --eval '
               const apiKey = String(process.env.COINALYZE_API_KEY ?? "").trim();
@@ -401,7 +207,8 @@ jobs:
               }
               console.log("Root Coinalyze credential is configured");
               process.exit(0);
-            '
+            ' || rollback_app
 
+            docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production || rollback_app
             docker exec nginx nginx -t
-            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps app

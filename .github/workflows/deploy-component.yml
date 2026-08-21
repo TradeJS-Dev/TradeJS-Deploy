@@ -1,0 +1,134 @@
+name: Deploy production component
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Component whose immutable image should advance
+        required: true
+        type: choice
+        options:
+          - agent
+          - ml-infer
+          - site
+          - docs
+      image_sha:
+        description: Exact source SHA used as the image tag
+        required: true
+        type: string
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Deploy
+        uses: actions/checkout@v6
+
+      - name: Validate immutable component release
+        env:
+          COMPONENT: ${{ inputs.component }}
+          IMAGE_SHA: ${{ inputs.image_sha }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          case "$COMPONENT" in
+            agent | ml-infer | site | docs) ;;
+            *) echo "Unsupported component: $COMPONENT" >&2; exit 1 ;;
+          esac
+          if [ "${#IMAGE_SHA}" -ne 40 ] || printf '%s' "$IMAGE_SHA" | grep -q '[^0-9a-f]'; then
+            echo 'Image SHA must be a full lowercase Git SHA' >&2
+            exit 1
+          fi
+          [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -n "$SSH_KEY" ] || {
+            echo 'SSH_HOST, SSH_USER, and SSH_KEY are required' >&2
+            exit 1
+          }
+
+      - name: Copy component rollout files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "docker-compose.prod.yml,scripts/release-state.sh"
+          target: ~/
+
+      - name: Deploy exact component image
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_COMPONENT: ${{ inputs.component }}
+          DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 20m
+          envs: DEPLOY_COMPONENT,DEPLOY_IMAGE_SHA
+          script: |
+            set -Eeuo pipefail
+            cd ~/
+            chmod +x ./scripts/release-state.sh
+            RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
+
+            previous_image_sha="$(RELEASE_STATE_FILE=release.env ./scripts/release-state.sh value "$DEPLOY_COMPONENT")"
+            cp release.env release.env.previous
+
+            checkout_agent_source() {
+              local source_sha="$1"
+              [ -f agent-ssh/id_ed25519 ] && [ -f agent-ssh/known_hosts ] || {
+                echo 'Agent SSH identity is not initialized' >&2
+                return 1
+              }
+              local git_ssh_command="ssh -i $HOME/agent-ssh/id_ed25519 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/agent-ssh/known_hosts"
+              GIT_SSH_COMMAND="$git_ssh_command" git -C tradejs-agent-repo fetch origin stable
+              git -C tradejs-agent-repo cat-file -e "$source_sha^{commit}"
+              git -C tradejs-agent-repo checkout --detach "$source_sha"
+            }
+
+            rollback_component() {
+              cp release.env.previous release.env
+              if [ "$DEPLOY_COMPONENT" = agent ]; then
+                checkout_agent_source "$previous_image_sha" || true
+              fi
+              docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull "$DEPLOY_COMPONENT" || true
+              docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d --no-deps --force-recreate "$DEPLOY_COMPONENT" || true
+              if [ "$DEPLOY_COMPONENT" = site ] || [ "$DEPLOY_COMPONENT" = docs ]; then
+                docker restart nginx >/dev/null 2>&1 || true
+              fi
+              exit 1
+            }
+
+            if [ "$DEPLOY_COMPONENT" = agent ]; then
+              checkout_agent_source "$DEPLOY_IMAGE_SHA" || rollback_component
+            fi
+
+            RELEASE_STATE_FILE=release.env ./scripts/release-state.sh update "$DEPLOY_COMPONENT" "$DEPLOY_IMAGE_SHA"
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull "$DEPLOY_COMPONENT" || rollback_component
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d --no-deps --force-recreate "$DEPLOY_COMPONENT" || rollback_component
+
+            component_running=""
+            for _attempt in $(seq 1 30); do
+              component_running="$(docker inspect --format='{{.State.Running}}' "$DEPLOY_COMPONENT" 2>/dev/null || true)"
+              [ "$component_running" = true ] && break
+              sleep 2
+            done
+            [ "$component_running" = true ] || {
+              docker logs --tail 200 "$DEPLOY_COMPONENT" || true
+              rollback_component
+            }
+
+            if [ "$DEPLOY_COMPONENT" = site ] || [ "$DEPLOY_COMPONENT" = docs ]; then
+              docker restart nginx
+              docker exec nginx nginx -t || rollback_component
+            fi
+
+            RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps "$DEPLOY_COMPONENT"

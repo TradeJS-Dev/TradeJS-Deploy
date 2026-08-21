@@ -23,6 +23,9 @@ persistent volumes, infrastructure containers, and server-only secrets.
 ## Boundaries
 
 - Deploy the app image published by `TradeJS-Project`, pinned by image tag.
+- Maintain one complete `release.env` containing exact full-SHA refs for app,
+  Project, agent, ml-infer, site, and docs. Mutable tags and partial release
+  state are invalid.
 - Fetch `deploy/runtime.env` from the exact dispatched Project SHA.
 - Inject application credentials and server secrets only from this
   repository's GitHub Actions repository secrets or organization secrets
@@ -34,6 +37,11 @@ persistent volumes, infrastructure containers, and server-only secrets.
 - Keep personal package composition, runtime app Dockerfile, cron, and
   `tradejs.config.ts` in `TradeJS-Project`.
 - Keep engine package publishing and ML inference implementation in `TradeJS`.
+- Keep Site and Docs source/image publication in their repositories, but own
+  their production rollout and all server SSH access here.
+- App rollouts must update only the app/Project identity. Agent, ml-infer,
+  site, and docs advance through the typed component workflow. Only the
+  explicit initialization workflow may reconcile the complete stack.
 - Reject any production Project image whose package manifest contains an npm
   prerelease; beta validation belongs to the isolated Project smoke flow.
 - Production deployment and full strategy config are read only from the exact
@@ -45,6 +53,8 @@ persistent volumes, infrastructure containers, and server-only secrets.
   inventory key names/types, and delete only the cleanup script's allowlist.
 - Keep the research-agent image in `TradeJS`, but route strategy edits and pull
   requests to the standalone strategy repositories on their `main` branches.
+- Run `runtime-control verify` as part of every successful app rollout and
+  restore both the previous app image state and runtime env on failure.
 
 ## Verification
 

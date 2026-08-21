@@ -1,0 +1,227 @@
+name: Initialize complete production release
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_sha:
+        description: Exact TradeJS-Project SHA and app image tag
+        required: true
+        type: string
+      agent_sha:
+        description: Exact TradeJS agent image/source SHA
+        required: true
+        type: string
+      ml_infer_sha:
+        description: Exact TradeJS ml-infer image/source SHA
+        required: true
+        type: string
+      site_sha:
+        description: Exact TradeJS-Site image/source SHA
+        required: true
+        type: string
+      docs_sha:
+        description: Exact TradeJS-Docs image/source SHA
+        required: true
+        type: string
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  initialize:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Deploy
+        uses: actions/checkout@v6
+
+      - name: Validate complete immutable release
+        env:
+          PROJECT_SHA: ${{ inputs.project_sha }}
+          AGENT_SHA: ${{ inputs.agent_sha }}
+          ML_INFER_SHA: ${{ inputs.ml_infer_sha }}
+          SITE_SHA: ${{ inputs.site_sha }}
+          DOCS_SHA: ${{ inputs.docs_sha }}
+        run: |
+          for name in PROJECT_SHA AGENT_SHA ML_INFER_SHA SITE_SHA DOCS_SHA; do
+            eval "value=\${$name}"
+            if [ "${#value}" -ne 40 ] || printf '%s' "$value" | grep -q '[^0-9a-f]'; then
+              echo "$name must be a full lowercase Git SHA" >&2
+              exit 1
+            fi
+          done
+          RELEASE_STATE_FILE=release.env.incoming ./scripts/release-state.sh initialize "$PROJECT_SHA" "$PROJECT_SHA" "$AGENT_SHA" "$ML_INFER_SHA" "$SITE_SHA" "$DOCS_SHA"
+
+      - name: Validate initialization secrets
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          GIT_SSH_PRIVATE_KEY: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+          REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
+          COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
+        run: |
+          missing=""
+          for name in SSH_HOST SSH_USER SSH_KEY GIT_SSH_PRIVATE_KEY NEXTAUTH_SECRET PG_PASSWORD AGENT_GITHUB_TOKEN REDISINSIGHT_HTPASSWD COINALYZE_API_KEY; do
+            eval "value=\${$name}"
+            [ -n "$value" ] || missing="$missing $name"
+          done
+          [ -z "$missing" ] || {
+            echo "Missing required GitHub Actions secrets:$missing" >&2
+            exit 1
+          }
+
+      - name: Checkout immutable TradeJS Project
+        uses: actions/checkout@v6
+        with:
+          repository: TradeJS-Dev/TradeJS-Project
+          ref: ${{ inputs.project_sha }}
+          path: tradejs-project
+
+      - name: Build complete runtime environment
+        env:
+          DEPLOY_NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          DEPLOY_AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+          DEPLOY_COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
+          DEPLOY_GIT_SSH_PRIVATE_KEY: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
+          REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
+        run: |
+          cp tradejs-project/deploy/runtime.env runtime.env.incoming
+          cat >> runtime.env.incoming <<'EOF'
+          APP_MEMORY_LIMIT=5g
+          AGENT_MEMORY_LIMIT=4g
+          SITE_MEMORY_LIMIT=512m
+          DOCS_MEMORY_LIMIT=256m
+          TIMESCALE_MEMORY_LIMIT=4g
+          REDIS_MEMORY_LIMIT=4g
+          ML_INFER_MEMORY_LIMIT=1g
+          NGINX_MEMORY_LIMIT=256m
+          CERTBOT_MEMORY_LIMIT=256m
+          RESEARCH_AUTO_PARENT_HEAP_MB=1024
+          RESEARCH_AUTO_BACKTEST_PARENT_HEAP_MB=2048
+          RESEARCH_AUTO_AI_TRAIN_PARENT_HEAP_MB=2048
+          RESEARCH_AUTO_AGENT_PARENT_HEAP_MB=1536
+          AGENT_GITHUB_ORGANIZATION=TradeJS-Dev
+          AGENT_GITHUB_BASE_BRANCH=main
+          EOF
+          printf 'AUTH_SECRET=%s\n' "$DEPLOY_NEXTAUTH_SECRET" >> runtime.env.incoming
+          printf 'NEXTAUTH_SECRET=%s\n' "$DEPLOY_NEXTAUTH_SECRET" >> runtime.env.incoming
+          printf 'PG_PASSWORD=%s\n' "$DEPLOY_PG_PASSWORD" >> runtime.env.incoming
+          printf 'AGENT_GITHUB_TOKEN=%s\n' "$DEPLOY_AGENT_GITHUB_TOKEN" >> runtime.env.incoming
+          printf 'COINALYZE_API_KEY=%s\n' "$DEPLOY_COINALYZE_API_KEY" >> runtime.env.incoming
+          printf '%s\n' "$DEPLOY_GIT_SSH_PRIVATE_KEY" > agent-key.incoming
+          printf '%s\n' "$REDISINSIGHT_HTPASSWD" > nginx/.htpasswd
+
+      - name: Copy complete release to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "runtime.env.incoming,release.env.incoming,agent-key.incoming,docker-compose.prod.yml,nginx,sql,certbot,scripts,init-cert.sh,ensure-swap.sh"
+          target: ~/
+
+      - name: Initialize exact release on server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_AGENT_SHA: ${{ inputs.agent_sha }}
+          DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 40m
+          envs: DEPLOY_AGENT_SHA,DEPLOY_PG_PASSWORD
+          script: |
+            set -Eeuo pipefail
+            cd ~/
+            mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh releases scripts
+            chmod +x ./init-cert.sh ./ensure-swap.sh ./scripts/*.sh
+            RELEASE_STATE_FILE=release.env.incoming ./scripts/release-state.sh validate
+            ./ensure-swap.sh
+
+            if docker inspect inv-redis >/dev/null 2>&1; then
+              ./scripts/redis-backup.sh --verify
+            fi
+
+            mv agent-key.incoming agent-ssh/id_ed25519
+            chmod 700 agent-ssh
+            chmod 600 agent-ssh/id_ed25519
+            ssh-keyscan github.com > agent-ssh/known_hosts
+            chmod 644 agent-ssh/known_hosts
+            git_ssh_command="ssh -i $HOME/agent-ssh/id_ed25519 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/agent-ssh/known_hosts"
+            if ! git -C tradejs-agent-repo rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+              rm -rf tradejs-agent-repo
+              GIT_SSH_COMMAND="$git_ssh_command" git clone git@github.com:TradeJS-Dev/TradeJS.git tradejs-agent-repo
+            fi
+            GIT_SSH_COMMAND="$git_ssh_command" git -C tradejs-agent-repo fetch origin stable
+            git -C tradejs-agent-repo cat-file -e "$DEPLOY_AGENT_SHA^{commit}"
+            git -C tradejs-agent-repo checkout --detach "$DEPLOY_AGENT_SHA"
+
+            [ ! -f .env ] || cp .env .env.previous
+            [ ! -f release.env ] || cp release.env release.env.previous
+            mv runtime.env.incoming .env
+            mv release.env.incoming release.env
+            RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
+
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis ml-infer site docs certbot certbot-cron
+
+            redis_ready=false
+            for _attempt in $(seq 1 150); do
+              if docker exec inv-redis redis-cli ping 2>/dev/null | grep -q PONG; then
+                redis_ready=true
+                break
+              fi
+              sleep 2
+            done
+            [ "$redis_ready" = true ] || {
+              docker logs --tail 200 inv-redis
+              exit 1
+            }
+            ./scripts/redis-backup.sh --verify
+
+            timescale_ready=false
+            for _attempt in $(seq 1 60); do
+              if docker exec inv-timescale pg_isready -U app -d app >/dev/null 2>&1; then
+                timescale_ready=true
+                break
+              fi
+              sleep 2
+            done
+            [ "$timescale_ready" = true ] || {
+              docker logs --tail 200 inv-timescale
+              exit 1
+            }
+            escaped_pg_password="$(printf '%s' "$DEPLOY_PG_PASSWORD" | sed "s/'/''/g")"
+            printf "ALTER ROLE app WITH PASSWORD '%s';\n" "$escaped_pg_password" |
+              docker exec -i inv-timescale psql -v ON_ERROR_STOP=1 -U app -d app
+            unset escaped_pg_password
+
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d app agent nginx
+
+            app_health=""
+            for _attempt in $(seq 1 30); do
+              app_health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app)"
+              [ "$app_health" = healthy ] && break
+              [ "$app_health" != unhealthy ] || {
+                docker logs --tail 200 app
+                exit 1
+              }
+              sleep 5
+            done
+            [ "$app_health" = healthy ] || {
+              docker logs --tail 200 app
+              exit 1
+            }
+
+            docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production
+            docker exec nginx nginx -t
+            docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps

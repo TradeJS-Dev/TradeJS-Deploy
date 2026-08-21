@@ -6,12 +6,15 @@ const assert = (condition, message) => {
 };
 
 const workflow = read('.github/workflows/deploy.yml');
+const componentWorkflow = read('.github/workflows/deploy-component.yml');
+const initializeWorkflow = read('.github/workflows/initialize-release.yml');
 const backupWorkflow = read('.github/workflows/redis-backup.yml');
 const maintenanceWorkflow = read('.github/workflows/docker-maintenance.yml');
 const runtimeControlWorkflow = read('.github/workflows/runtime-control.yml');
 const compose = read('docker-compose.prod.yml');
 const redisBackup = read('scripts/redis-backup.sh');
 const appRollback = read('scripts/rollback-app.sh');
+const releaseState = read('scripts/release-state.sh');
 const legacyCleanup = read('scripts/cleanup-legacy-runtime-redis.sh');
 const packageJson = JSON.parse(read('package.json'));
 
@@ -22,6 +25,8 @@ assert(
 );
 assert(
   !workflow.includes('environment:') &&
+    !componentWorkflow.includes('environment:') &&
+    !initializeWorkflow.includes('environment:') &&
     !backupWorkflow.includes('environment:') &&
     !maintenanceWorkflow.includes('environment:') &&
     !runtimeControlWorkflow.includes('environment:'),
@@ -36,7 +41,7 @@ assert(
 assert(
   workflow.includes('repository: TradeJS-Dev/TradeJS-Project') &&
     workflow.includes('ref: ${{ steps.release.outputs.project_sha }}') &&
-    workflow.includes('cp tradejs-project/deploy/runtime.env .env'),
+    workflow.includes('cp tradejs-project/deploy/runtime.env runtime.env.incoming'),
   'Deploy does not pin runtime config to the dispatched Project SHA',
 );
 assert(
@@ -58,14 +63,13 @@ assert(
   'Deploy interpolates secrets directly into its shell program',
 );
 assert(
-  workflow.includes('            PG_PASSWORD \\\n') &&
-    !workflow.includes('Preserve existing server-owned database password') &&
+  !workflow.includes('Preserve existing server-owned database password') &&
     !workflow.includes('.runtime-pg-password.env') &&
     !workflow.includes('if [ -n "$DEPLOY_PG_PASSWORD" ]'),
   'PG_PASSWORD must be required and injected without a server fallback',
 );
 assert(
-  compose.includes('ghcr.io/tradejs-dev/tradejs-project-app:${APP_IMAGE_TAG}') &&
+  compose.includes('ghcr.io/tradejs-dev/tradejs-project-app:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}') &&
     compose.includes('POSTGRES_PASSWORD=${PG_PASSWORD:?PG_PASSWORD is required}') &&
     !compose.includes('POSTGRES_PASSWORD=app'),
   'Production Compose does not use the immutable Project image and secret DB password',
@@ -83,7 +87,6 @@ assert(
 );
 assert(
   workflow.includes('./scripts/redis-backup.sh --verify') &&
-    workflow.includes('Redis persistent-key mismatch after Compose update') &&
     backupWorkflow.includes('schedule:') &&
     backupWorkflow.includes('redis-backup.sh --verify'),
   'Redis backup drill and post-Compose persistence checks are missing',
@@ -138,6 +141,52 @@ assert(
     redisBackup.includes('Redis persistence must use /data/dump.rdb') &&
     redisBackup.includes('tradejs-redis-backup/v1'),
   'Redis backup script does not verify the canonical snapshot',
+);
+assert(
+  !workflow.includes('image_tag:') &&
+    !workflow.includes('app_changed') &&
+    !workflow.includes('agent_changed') &&
+    !workflow.includes('ml_infer_changed') &&
+    workflow.includes('update app "$DEPLOY_PROJECT_SHA" "$DEPLOY_PROJECT_SHA"') &&
+    workflow.includes('runtime-control verify') &&
+    !workflow.includes('up -d timescale redis') &&
+    !workflow.includes('up -d site docs'),
+  'App rollout must advance only one exact Project identity',
+);
+assert(
+  componentWorkflow.includes('type: choice') &&
+    componentWorkflow.includes('- agent') &&
+    componentWorkflow.includes('- ml-infer') &&
+    componentWorkflow.includes('- site') &&
+    componentWorkflow.includes('- docs') &&
+    componentWorkflow.includes('update "$DEPLOY_COMPONENT" "$DEPLOY_IMAGE_SHA"') &&
+    !componentWorkflow.includes('IMAGE_SHA: latest'),
+  'Non-app components need one typed immutable rollout interface',
+);
+assert(
+  initializeWorkflow.includes('Initialize complete production release') &&
+    initializeWorkflow.includes('release.env.incoming') &&
+    initializeWorkflow.includes('runtime-control verify') &&
+    initializeWorkflow.includes('redis-backup.sh --verify'),
+  'A complete exact release must have one explicit initialization path',
+);
+assert(
+  releaseState.includes('APP_IMAGE_TAG') &&
+    releaseState.includes('PROJECT_SHA') &&
+    releaseState.includes('AGENT_IMAGE_TAG') &&
+    releaseState.includes('ML_INFER_IMAGE_TAG') &&
+    releaseState.includes('SITE_IMAGE_TAG') &&
+    releaseState.includes('DOCS_IMAGE_TAG') &&
+    releaseState.includes('full lowercase Git SHA') &&
+    !releaseState.includes('latest'),
+  'Release state must be complete, declarative, and immutable',
+);
+assert(
+  compose.includes('tradejs-site:${SITE_IMAGE_TAG:?SITE_IMAGE_TAG is required}') &&
+    compose.includes('tradejs-docs:${DOCS_IMAGE_TAG:?DOCS_IMAGE_TAG is required}') &&
+    !compose.includes('tradejs-site:latest') &&
+    !compose.includes('tradejs-docs:latest'),
+  'Public web images must use exact Deploy-owned release refs',
 );
 assert(
     workflow.includes('runtime-package-manifest.json') &&

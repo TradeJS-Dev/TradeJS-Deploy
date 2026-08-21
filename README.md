@@ -12,11 +12,13 @@ from source and it does not depend directly on npm package publishing.
 - `TradeJS` continues to build and push:
   - `ghcr.io/tradejs-dev/tradejs-agent:<git-sha>`
   - `ghcr.io/tradejs-dev/tradejs-ml-infer:<git-sha>`
-- `TradeJS-Deploy` receives the image tag and immutable Project SHA through
-  `repository_dispatch` or `workflow_dispatch`, then reads the secret-free app
-  runtime config from that exact Project revision.
+- `TradeJS-Deploy` receives one immutable Project SHA through
+  `repository_dispatch` or `workflow_dispatch`. That SHA is also the app image
+  tag, so two independently supplied values cannot drift.
 - The server pulls only tagged images and runs `docker compose`.
-- App tags and Project refs must be immutable commit SHAs; `latest` is rejected for app rollouts.
+- App, Project, agent, ml-infer, site, and docs refs are all full immutable Git
+  SHAs. `release.env` is a complete declaration and rejects missing or mutable
+  refs.
 - Every app image contains `/app/runtime-package-manifest.json`. Deploy stores
   and compares old/new manifests so package changes are explicit alongside the
   Git-owned computed `strategyRevision` and `deploymentCompositionId` changes.
@@ -25,13 +27,15 @@ from source and it does not depend directly on npm package publishing.
   Project composition sync batches promoted `latest` packages into one image
   before Deploy sees any new app SHA.
 - The app image supervises Next.js, the signals daemon, and the market WebSocket gateway. The compose healthcheck requires both ports `3000` and `3001` to be healthy, while Nginx proxies `/ws/market` to the gateway with WebSocket upgrade headers.
-- Deploy waits for the updated app container to become healthy, prints its logs and fails on timeout/unhealthy status, then validates the running Nginx configuration with `nginx -t`.
+- Deploy waits for the updated app container to become healthy, runs
+  `runtime-control verify`, prints logs and rolls back both the app image and
+  runtime env on failure, then validates Nginx with `nginx -t`.
 - Deployment ensures a persistent 4 GB `/swapfile`, caps the main service containers through Compose memory limits, and keeps runtime signals for three days by default.
 - Redis Stack is pinned to `7.4.0-v8`, uses AOF (`everysec`) plus RDB snapshots, and is backed up with a restore drill before deploys and once per day. Backups are retained under `~/backups/redis` for 14 days by default.
 - Redis explicitly uses `/data/dump.rdb`, making the named `redisdata` volume the sole persistence location. A deployment is rejected when Redis uses any other persistence path. The persistent-key count must match after Redis is recreated.
-- `tradejs.dev` and `docs.tradejs.dev` are published by the separate
-  `TradeJS-Site` and `TradeJS-Docs` workflows; this deployment does not pull or
-  restart their containers.
+- `TradeJS-Site` and `TradeJS-Docs` publish full-SHA images without server
+  credentials. Their production rollout happens only through Deploy's typed
+  component workflow.
 
 ## Required Secrets
 
@@ -71,21 +75,19 @@ The research-agent SSH key must belong to a machine user that can read
 needs contents and pull-request read/write access to the same strategy set.
 TrendLine and ReverseTrendLine both target `TradeJS-Strategy-TrendLine`.
 
-## Optional Workflow Inputs
+## Deployment Workflows
 
-Manual deploy supports overriding:
+- `Deploy Project app` accepts only `project_sha`; the app tag is derived from
+  the same SHA and no unrelated service is reconciled.
+- `Deploy production component` accepts a typed `agent`, `ml-infer`, `site`, or
+  `docs` component plus its exact source/image SHA.
+- `Initialize complete production release` accepts all five source SHAs and is
+  the only workflow allowed to reconcile infrastructure and every service.
 
-- `image_tag`
-- `project_sha`
-- `app_changed`
-- `agent_changed`
-- `ml_infer_changed`
-
-`image_tag` and `project_sha` must be full immutable SHAs. Strategy packages and
-full config are committed together in the Project revision; runtime validation
-computes the strategy and deployment composition identifiers. If rollback is
-required, optionally pause entries and restore the previous image via
-`release.env.previous`; there is no Redis release pointer.
+Run initialization once after adopting the complete release-state contract.
+After that, routine workflows update exactly one component. Strategy packages
+and full config remain committed together in the Project revision; there is no
+Redis release pointer.
 
 ## Runtime strategy operations
 
@@ -125,7 +127,8 @@ signals, evaluations, and trades. The backup is the recovery path.
 - `.env` is generated in CI from GitHub Actions secrets owned by or explicitly
   granted to `TradeJS-Deploy`.
 - Non-secret app values come from `TradeJS-Project/deploy/runtime.env`.
-- `release.env` is persisted on the server as the current deployed image state.
-- `release-update.env` is generated in CI and only carries the incoming deploy delta.
+- `release.env` is persisted on the server as the complete exact release state.
+- `runtime.env.incoming` is generated in CI for an app rollout and replaces
+  `.env` atomically while retaining `.env.previous` for rollback.
 
 Keywords: ai, claude, codex.
