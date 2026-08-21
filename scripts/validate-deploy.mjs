@@ -92,7 +92,7 @@ assert(
   'Redis backup drill and post-Compose persistence checks are missing',
 );
 assert(
-  runtimeControlWorkflow.includes('confirm_mutation') &&
+  !runtimeControlWorkflow.includes('confirm_mutation') &&
     runtimeControlWorkflow.includes('./scripts/redis-backup.sh --verify') &&
     runtimeControlWorkflow.includes('runtime-control') &&
     runtimeControlWorkflow.includes('cleanup-legacy') &&
@@ -101,7 +101,7 @@ assert(
     runtimeControlWorkflow.includes('--showSkipStats') &&
     !runtimeControlWorkflow.includes('signals \\\n                  --makeOrders') &&
     !runtimeControlWorkflow.includes('redis-cli JSON.SET'),
-  'Runtime controls must use the Git-owned CLI after confirmation and backup',
+  'Runtime controls must use the Git-owned CLI with backup protection',
 );
 assert(
   legacyCleanup.includes('DELETE_LEGACY_RUNTIME_KEYS') &&

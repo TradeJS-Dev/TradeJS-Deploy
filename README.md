@@ -54,7 +54,7 @@ GitHub Environments are not used while there is no approval or branch gate.
 - `AGENT_GITHUB_TOKEN`
 - `REDISINSIGHT_HTPASSWD`
 - `COINALYZE_API_KEY` — injected into the app and synchronized into the root
-  Redis user record after backup and health verification; the value is never
+Redis user record after backup and health verification; the value is never
   printed by the deploy workflow.
 
 If `Copy deploy files to server` fails with `can't connect without a private SSH key or password`,
@@ -96,9 +96,9 @@ configuration source is the exact Project image's `tradejs.config.ts`; the
 application displays it read-only. `verify` validates the declaration, installed
 package manifest, and server-owned account binding. `pause` and `resume` are the
 only routine mutations and affect only optional
-`users:<user>:runtime:controls` overrides. Each mutation requires
-`confirm_mutation=true`, creates a Redis backup, passes a restore drill, and
-re-runs `runtime-control verify`.
+`users:<user>:runtime:controls` overrides. Selecting the mutation is sufficient;
+every mutation creates a Redis backup, passes a restore drill, and re-runs
+`runtime-control verify`.
 `audit-backups` checksum-verifies the five newest RDB files and prints their
 DBSIZE without reading values. Restore drills require the
 snapshot to be newer than the previous `LASTSAVE`, pass `redis-check-rdb`,

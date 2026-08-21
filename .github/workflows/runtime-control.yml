@@ -31,11 +31,6 @@ on:
         required: true
         default: production
         type: string
-      confirm_mutation:
-        description: "Required for pause, resume, and legacy cleanup"
-        required: true
-        default: false
-        type: boolean
 
 concurrency:
   group: production-runtime-control
@@ -49,7 +44,6 @@ jobs:
       RUNTIME_USER: ${{ inputs.user_name }}
       RUNTIME_STRATEGY: ${{ inputs.strategy_name }}
       RUNTIME_DEPLOYMENT: ${{ inputs.deployment_id }}
-      RUNTIME_CONFIRM_MUTATION: ${{ inputs.confirm_mutation }}
     steps:
       - name: Apply runtime operation on server
         uses: appleboy/ssh-action@v1.0.3
@@ -58,7 +52,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 20m
-          envs: RUNTIME_ACTION,RUNTIME_USER,RUNTIME_STRATEGY,RUNTIME_DEPLOYMENT,RUNTIME_CONFIRM_MUTATION
+          envs: RUNTIME_ACTION,RUNTIME_USER,RUNTIME_STRATEGY,RUNTIME_DEPLOYMENT
           script: |
             set -Eeuo pipefail
             cd ~/
@@ -169,19 +163,11 @@ jobs:
                   --parallel 4
                 ;;
               pause | resume)
-                [ "$RUNTIME_CONFIRM_MUTATION" = true ] || {
-                  echo 'confirm_mutation must be enabled for pause/resume' >&2
-                  exit 1
-                }
                 ./scripts/redis-backup.sh --verify
                 runtime_command "$RUNTIME_ACTION" --strategy "$RUNTIME_STRATEGY"
                 runtime_command verify
                 ;;
               cleanup-legacy)
-                [ "$RUNTIME_CONFIRM_MUTATION" = true ] || {
-                  echo 'confirm_mutation must be enabled for legacy cleanup' >&2
-                  exit 1
-                }
                 runtime_command verify
                 ./scripts/redis-backup.sh --verify
                 TRADEJS_CONFIRM_LEGACY_RUNTIME_CLEANUP=DELETE_LEGACY_RUNTIME_KEYS \
