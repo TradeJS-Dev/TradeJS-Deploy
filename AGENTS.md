@@ -25,8 +25,9 @@ persistent volumes, infrastructure containers, and server-only secrets.
 - Deploy the app image published by `TradeJS-Project`, pinned by image tag.
 - Fetch `deploy/runtime.env` from the exact dispatched Project SHA.
 - Inject application credentials and server secrets only from this
-  repository's protected `production` GitHub environment; never commit values
-  or read them from another repository.
+  repository's GitHub Actions repository secrets or organization secrets
+  explicitly granted to it; never commit values or read them from another
+  repository.
 - Require `PG_PASSWORD` before copying deployment files and keep the persistent
   Timescale `app` role aligned with it before starting the application
   container. Never recover it from an existing server `.env`.

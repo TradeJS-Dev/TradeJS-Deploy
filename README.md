@@ -35,10 +35,11 @@ from source and it does not depend directly on npm package publishing.
 
 ## Required Secrets
 
-Store every value below in the protected `production` GitHub environment of
-`TradeJS-Deploy`, not in TradeJS, TradeJS-Project, package repositories, or
-repository-wide secrets. Deploy, backup, runtime-control, and maintenance jobs
-all bind that environment before reading credentials.
+Make every value below available to `TradeJS-Deploy` as a repository secret or
+an organization secret explicitly granted to this repository. Do not store
+these credentials in TradeJS, TradeJS-Project, or package repositories. Deploy,
+backup, runtime-control, and maintenance jobs read these scopes directly;
+GitHub Environments are not used while there is no approval or branch gate.
 
 - `SSH_HOST`
 - `SSH_USER`
@@ -58,8 +59,9 @@ If `Copy deploy files to server` fails with `can't connect without a private SSH
 `PG_PASSWORD` is the application database credential. It is injected into both
 the app environment and Timescale; every rollout also updates the existing
 `app` role, so a persistent database volume does not retain the old checked-in
-password. Every installation must provide the `production` environment secret;
-the workflow never recovers it from an existing server `.env`. Generate it
+password. Every installation must provide `PG_PASSWORD` as a Deploy-owned
+GitHub Actions secret; the workflow never recovers it from an existing server
+`.env`. Generate it
 as a URL-safe value without whitespace
 or line breaks (for example, `openssl rand -hex 32`) because it is transported
 through a Compose env file.
@@ -120,8 +122,8 @@ signals, evaluations, and trades. The backup is the recovery path.
 
 ## Local Files
 
-- `.env` is generated in CI from `TradeJS-Deploy`'s protected `production`
-  environment secrets.
+- `.env` is generated in CI from GitHub Actions secrets owned by or explicitly
+  granted to `TradeJS-Deploy`.
 - Non-secret app values come from `TradeJS-Project/deploy/runtime.env`.
 - `release.env` is persisted on the server as the current deployed image state.
 - `release-update.env` is generated in CI and only carries the incoming deploy delta.

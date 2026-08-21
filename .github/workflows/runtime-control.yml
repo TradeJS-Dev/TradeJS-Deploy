@@ -44,7 +44,6 @@ concurrency:
 jobs:
   runtime-control:
     runs-on: ubuntu-latest
-    environment: production
     env:
       RUNTIME_ACTION: ${{ inputs.action }}
       RUNTIME_USER: ${{ inputs.user_name }}

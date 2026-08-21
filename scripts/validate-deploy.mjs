@@ -17,11 +17,15 @@ const packageJson = JSON.parse(read('package.json'));
 
 assert(
   workflow.includes('group: production-deploy') &&
-    workflow.includes('cancel-in-progress: false') &&
-    workflow.includes('environment: production') &&
-    backupWorkflow.includes('environment: production') &&
-    maintenanceWorkflow.includes('environment: production'),
+    workflow.includes('cancel-in-progress: false'),
   'Production deploys must be serialized',
+);
+assert(
+  !workflow.includes('environment:') &&
+    !backupWorkflow.includes('environment:') &&
+    !maintenanceWorkflow.includes('environment:') &&
+    !runtimeControlWorkflow.includes('environment:'),
+  'Deploy workflows must read repository or organization secrets directly',
 );
 
 assert(
@@ -85,8 +89,7 @@ assert(
   'Redis backup drill and post-Compose persistence checks are missing',
 );
 assert(
-  runtimeControlWorkflow.includes('environment: production') &&
-    runtimeControlWorkflow.includes('confirm_mutation') &&
+  runtimeControlWorkflow.includes('confirm_mutation') &&
     runtimeControlWorkflow.includes('./scripts/redis-backup.sh --verify') &&
     runtimeControlWorkflow.includes('runtime-control') &&
     runtimeControlWorkflow.includes('cleanup-legacy') &&
