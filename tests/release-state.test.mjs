@@ -45,6 +45,11 @@ test('initializes and validates one complete immutable release', (t) => {
     `SITE_IMAGE_TAG=${sha('e')}`,
     `DOCS_IMAGE_TAG=${sha('f')}`,
   ]);
+  assert.equal(
+    fs.statSync(releaseFile).mode & 0o777,
+    0o644,
+    'release state contains only immutable public refs and must be readable by the SCP action container',
+  );
 });
 
 test('updates exactly one component and preserves the other refs', (t) => {

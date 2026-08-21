@@ -97,6 +97,7 @@ write_state() {
     printf 'SITE_IMAGE_TAG=%s\n' "$SITE_IMAGE_TAG"
     printf 'DOCS_IMAGE_TAG=%s\n' "$DOCS_IMAGE_TAG"
   } > "$temporary_file"
+  chmod 0644 "$temporary_file"
   mv "$temporary_file" "$release_state_file"
 }
 
