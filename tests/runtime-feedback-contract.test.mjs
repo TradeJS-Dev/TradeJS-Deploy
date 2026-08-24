@@ -113,6 +113,8 @@ exit 0
 
   assert.equal(result.status, 0, result.stderr);
   const sql = fs.readFileSync(sqlFile, 'utf8');
+  assert.match(sql, /^DO \$\$ BEGIN/);
+  assert.ok(!sql.includes('\\$'));
   assert.match(sql, /ALTER ROLE runtime_replay SET default_transaction_read_only = on/);
   assert.match(sql, /GRANT SELECT ON ALL TABLES IN SCHEMA public TO runtime_replay/);
   assert.deepEqual(fs.readFileSync(envFile, 'utf8').trim().split('\n'), [

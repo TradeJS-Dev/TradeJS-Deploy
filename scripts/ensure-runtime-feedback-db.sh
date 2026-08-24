@@ -30,7 +30,7 @@ fi
 docker inspect inv-timescale >/dev/null
 
 escaped_password="$(printf '%s' "$replay_pg_password" | sed "s/'/''/g")"
-printf "DO \\\$\\\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE %s LOGIN; END IF; END \\\$\\\$;\nALTER ROLE %s WITH LOGIN PASSWORD '%s';\nALTER ROLE %s SET default_transaction_read_only = on;\nGRANT CONNECT ON DATABASE %s TO %s;\nGRANT USAGE ON SCHEMA public TO %s;\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO %s;\nGRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO %s;\nALTER DEFAULT PRIVILEGES FOR ROLE app IN SCHEMA public GRANT SELECT ON TABLES TO %s;\nALTER DEFAULT PRIVILEGES FOR ROLE app IN SCHEMA public GRANT SELECT ON SEQUENCES TO %s;\n" \
+printf "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE %s LOGIN; END IF; END \$\$;\nALTER ROLE %s WITH LOGIN PASSWORD '%s';\nALTER ROLE %s SET default_transaction_read_only = on;\nGRANT CONNECT ON DATABASE %s TO %s;\nGRANT USAGE ON SCHEMA public TO %s;\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO %s;\nGRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO %s;\nALTER DEFAULT PRIVILEGES FOR ROLE app IN SCHEMA public GRANT SELECT ON TABLES TO %s;\nALTER DEFAULT PRIVILEGES FOR ROLE app IN SCHEMA public GRANT SELECT ON SEQUENCES TO %s;\n" \
   "$replay_role" "$replay_role" "$replay_role" "$escaped_password" \
   "$replay_role" "$database" "$replay_role" "$replay_role" \
   "$replay_role" "$replay_role" "$replay_role" "$replay_role" |
