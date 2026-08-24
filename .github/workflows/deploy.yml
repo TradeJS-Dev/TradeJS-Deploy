@@ -50,6 +50,7 @@ jobs:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          REPLAY_PG_PASSWORD: ${{ secrets.REPLAY_PG_PASSWORD }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
         run: |
@@ -115,16 +116,17 @@ jobs:
         env:
           DEPLOY_PROJECT_SHA: ${{ steps.release.outputs.project_sha }}
           DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          DEPLOY_REPLAY_PG_PASSWORD: ${{ secrets.REPLAY_PG_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 30m
-          envs: DEPLOY_PROJECT_SHA,DEPLOY_PG_PASSWORD
+          envs: DEPLOY_PROJECT_SHA,DEPLOY_PG_PASSWORD,DEPLOY_REPLAY_PG_PASSWORD
           script: |
             set -Eeuo pipefail
             cd ~/
-            chmod +x ./scripts/release-state.sh ./scripts/redis-backup.sh ./scripts/rollback-app.sh
+            chmod +x ./scripts/*.sh
 
             RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
             for container in inv-redis inv-timescale ml-infer nginx; do
@@ -150,6 +152,7 @@ jobs:
 
             ./scripts/redis-backup.sh --verify || rollback_app
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull app || rollback_app
+            ./scripts/set-runtime-image-digest.sh .env "ghcr.io/tradejs-dev/tradejs-project-app:$DEPLOY_PROJECT_SHA" >/dev/null || rollback_app
 
             previous_manifest="releases/runtime-package-manifest-previous.json"
             incoming_manifest="releases/runtime-package-manifest-$DEPLOY_PROJECT_SHA.json"
@@ -173,6 +176,10 @@ jobs:
               docker exec -i inv-timescale psql -v ON_ERROR_STOP=1 -U app -d app ||
               rollback_app
             unset escaped_pg_password
+
+            PG_PASSWORD="$DEPLOY_PG_PASSWORD" \
+              REPLAY_PG_PASSWORD="$DEPLOY_REPLAY_PG_PASSWORD" \
+              ./scripts/ensure-runtime-feedback-db.sh || rollback_app
 
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d --no-deps --force-recreate app ||
               rollback_app
@@ -210,5 +217,6 @@ jobs:
             ' || rollback_app
 
             docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production || rollback_app
+            ./scripts/install-runtime-feedback-cron.sh || rollback_app
             docker exec nginx nginx -t
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps app

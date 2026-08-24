@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       prune_images:
-        description: "Run docker image prune -a -f on the server"
+        description: "Prune unused server images while preserving replay leases"
         required: true
         default: true
         type: boolean
@@ -14,6 +14,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Deploy
+        uses: actions/checkout@v6
+
+      - name: Copy retention-aware maintenance script
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "scripts/docker-image-prune.sh"
+          target: ~/
+
       - name: Prune Docker images on server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -21,4 +33,5 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            docker image prune -a -f
+            chmod +x "$HOME/scripts/docker-image-prune.sh"
+            "$HOME/scripts/docker-image-prune.sh"

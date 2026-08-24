@@ -63,6 +63,7 @@ jobs:
           GIT_SSH_PRIVATE_KEY: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
           PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          REPLAY_PG_PASSWORD: ${{ secrets.REPLAY_PG_PASSWORD }}
           AGENT_GITHUB_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
           REDISINSIGHT_HTPASSWD: ${{ secrets.REDISINSIGHT_HTPASSWD }}
           COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
@@ -133,12 +134,13 @@ jobs:
         env:
           DEPLOY_AGENT_SHA: ${{ inputs.agent_sha }}
           DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          DEPLOY_REPLAY_PG_PASSWORD: ${{ secrets.REPLAY_PG_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 40m
-          envs: DEPLOY_AGENT_SHA,DEPLOY_PG_PASSWORD
+          envs: DEPLOY_AGENT_SHA,DEPLOY_PG_PASSWORD,DEPLOY_REPLAY_PG_PASSWORD
           script: |
             set -Eeuo pipefail
             cd ~/
@@ -172,6 +174,7 @@ jobs:
             RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
 
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull
+            ./scripts/set-runtime-image-digest.sh .env "ghcr.io/tradejs-dev/tradejs-project-app:$(RELEASE_STATE_FILE=release.env ./scripts/release-state.sh value app)" >/dev/null
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d timescale redis ml-infer site docs certbot certbot-cron
 
             redis_ready=false
@@ -204,6 +207,9 @@ jobs:
             printf "ALTER ROLE app WITH PASSWORD '%s';\n" "$escaped_pg_password" |
               docker exec -i inv-timescale psql -v ON_ERROR_STOP=1 -U app -d app
             unset escaped_pg_password
+            PG_PASSWORD="$DEPLOY_PG_PASSWORD" \
+              REPLAY_PG_PASSWORD="$DEPLOY_REPLAY_PG_PASSWORD" \
+              ./scripts/ensure-runtime-feedback-db.sh
 
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml up -d app agent nginx
 
@@ -223,5 +229,6 @@ jobs:
             }
 
             docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production
+            ./scripts/install-runtime-feedback-cron.sh
             docker exec nginx nginx -t
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps

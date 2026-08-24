@@ -117,6 +117,7 @@ services:
     restart: unless-stopped
     networks:
       - web
+      - runtime-replay
 
   redis:
     image: redis/redis-stack:7.4.0-v8
@@ -167,6 +168,7 @@ services:
       - "50051"
     networks:
       - web
+      - runtime-replay
 
   nginx:
     image: nginx:stable-alpine
@@ -238,6 +240,10 @@ services:
 networks:
   web:
     driver: bridge
+  runtime-replay:
+    name: tradejs-runtime-replay
+    driver: bridge
+    internal: true
 
 volumes:
   pgdata:

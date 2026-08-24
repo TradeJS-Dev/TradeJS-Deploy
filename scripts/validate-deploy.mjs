@@ -16,6 +16,11 @@ const redisBackup = read('scripts/redis-backup.sh');
 const appRollback = read('scripts/rollback-app.sh');
 const releaseState = read('scripts/release-state.sh');
 const legacyCleanup = read('scripts/cleanup-legacy-runtime-redis.sh');
+const runtimeFeedbackReplay = read('scripts/runtime-feedback-replay.sh');
+const runtimeFeedbackDb = read('scripts/ensure-runtime-feedback-db.sh');
+const runtimeFeedbackCron = read('scripts/install-runtime-feedback-cron.sh');
+const runtimeImageDigest = read('scripts/set-runtime-image-digest.sh');
+const dockerImagePrune = read('scripts/docker-image-prune.sh');
 const packageJson = JSON.parse(read('package.json'));
 
 assert(
@@ -84,6 +89,80 @@ assert(
     compose.includes('--appendonly') &&
     compose.includes('everysec'),
   'Redis must use the pinned image and canonical /data persistence',
+);
+assert(
+  compose.includes('name: tradejs-runtime-replay') &&
+    compose.includes('internal: true') &&
+    compose.match(/timescale:[\s\S]*networks:[\s\S]*- runtime-replay/) &&
+    compose.match(/ml-infer:[\s\S]*networks:[\s\S]*- runtime-replay/),
+  'Replay must reach Timescale and ML inference only through the internal replay network',
+);
+assert(
+  workflow.includes('REPLAY_PG_PASSWORD: ${{ secrets.REPLAY_PG_PASSWORD }}') &&
+    !workflow.match(/for name in [^\n]*REPLAY_PG_PASSWORD/) &&
+    workflow.includes('PG_PASSWORD="$DEPLOY_PG_PASSWORD"') &&
+    workflow.includes('set-runtime-image-digest.sh') &&
+    workflow.includes('ensure-runtime-feedback-db.sh') &&
+    workflow.includes('install-runtime-feedback-cron.sh') &&
+    initializeWorkflow.includes(
+      'REPLAY_PG_PASSWORD: ${{ secrets.REPLAY_PG_PASSWORD }}',
+    ) &&
+    !initializeWorkflow.match(/for name in [^\n]*REPLAY_PG_PASSWORD/) &&
+    initializeWorkflow.includes('PG_PASSWORD="$DEPLOY_PG_PASSWORD"') &&
+    initializeWorkflow.includes('set-runtime-image-digest.sh') &&
+    initializeWorkflow.includes('ensure-runtime-feedback-db.sh') &&
+    initializeWorkflow.includes('install-runtime-feedback-cron.sh'),
+  'App rollout must install the image-bound runtime feedback contour',
+);
+assert(
+  runtimeImageDigest.includes('RepoDigests') &&
+    runtimeImageDigest.includes('TRADEJS_PROJECT_IMAGE_DIGEST') &&
+    runtimeImageDigest.includes('sha256:[0-9a-f]{64}'),
+  'Runtime evidence must receive the pulled application image digest',
+);
+assert(
+  runtimeFeedbackDb.includes('runtime_replay') &&
+    runtimeFeedbackDb.includes('tradejs-runtime-replay-password/v1') &&
+    runtimeFeedbackDb.includes('tradejs_replay_$password_digest') &&
+    runtimeFeedbackDb.includes('PG_PASSWORD is required when REPLAY_PG_PASSWORD is not set') &&
+    runtimeFeedbackDb.includes('default_transaction_read_only = on') &&
+    runtimeFeedbackDb.includes('GRANT SELECT ON ALL TABLES') &&
+    runtimeFeedbackDb.includes('docker network create --internal') &&
+    runtimeFeedbackDb.includes('--alias ml-infer') &&
+    !runtimeFeedbackDb.includes('REDIS_HOST=redis'),
+  'Runtime feedback storage credentials must be read-only and isolated',
+);
+assert(
+  runtimeFeedbackReplay.includes('--pull=never') &&
+    runtimeFeedbackReplay.includes('image_repository@$image_digest') &&
+    runtimeFeedbackReplay.includes('--read-only') &&
+    runtimeFeedbackReplay.includes('--network "$network"') &&
+    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_ISOLATED_REDIS=true') &&
+    runtimeFeedbackReplay.includes('TRADEJS_TIMESCALE_READ_ONLY=true') &&
+    runtimeFeedbackReplay.includes('ML_GRPC_ADDRESS=ml-infer:50051') &&
+    runtimeFeedbackReplay.includes('MAKE_ORDERS=false') &&
+    runtimeFeedbackReplay.includes(
+      'TRADEJS_EXTERNAL_ORDER_PLACEMENT=false',
+    ) &&
+    runtimeFeedbackReplay.includes('--memory 3g') &&
+    runtimeFeedbackReplay.includes('--cpus 1.5') &&
+    runtimeFeedbackReplay.includes('$bundle_dir:/runtime-evidence:ro') &&
+    !runtimeFeedbackReplay.includes('-v "$HOME/.env') &&
+    !runtimeFeedbackReplay.includes('REDIS_HOST=redis'),
+  'Runtime feedback replay must use the exact image with hard resource and IO boundaries',
+);
+assert(
+  runtimeFeedbackCron.includes('20 21 * * *') &&
+    runtimeFeedbackCron.includes('CRON_TZ=Europe/Moscow'),
+  'Runtime feedback replay must run only after the daily evidence window closes',
+);
+assert(
+  dockerImagePrune.includes('tradejs.runtime-feedback.image-lease=true') &&
+    dockerImagePrune.includes('tradejs.runtime-feedback.expires-at') &&
+    dockerImagePrune.includes('docker image prune -a -f') &&
+    maintenanceWorkflow.includes('docker-image-prune.sh') &&
+    !maintenanceWorkflow.includes('docker image prune -a -f'),
+  'Docker maintenance must preserve unexpired replay image leases',
 );
 assert(
   workflow.includes('./scripts/redis-backup.sh --verify') &&
