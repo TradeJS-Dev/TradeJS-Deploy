@@ -42,8 +42,9 @@ persistent volumes, infrastructure containers, and server-only secrets.
 - App rollouts must update only the app/Project identity. Agent, ml-infer,
   site, and docs advance through the typed component workflow. Only the
   explicit initialization workflow may reconcile the complete stack.
-- Reject any production Project image whose package manifest contains an npm
-  prerelease; beta validation belongs to the isolated Project smoke flow.
+- Accept only one exact framework release cohort: either canonical stable or
+  canonical `x.y.z-beta.N`. Base, Kit, and strategy packages remain stable-only;
+  reject mixed framework versions and every other prerelease shape.
 - Production deployment and full strategy config are read only from the exact
   Project image's `tradejs.config.ts`. Redis may own trading accounts, optional
   pause overrides, audit events, heartbeats, signals, and trades, but never

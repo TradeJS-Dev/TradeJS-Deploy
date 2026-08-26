@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { validateRuntimePackageChannel } from './runtime-package-channel.mjs';
 
 const [previousPath, nextPath, outputPath] = process.argv.slice(2);
 if (!nextPath || !outputPath) {
@@ -15,14 +16,7 @@ const next = read(nextPath);
 if (next.schema !== 'tradejs-runtime-package-manifest/v1') {
   throw new Error('Incoming image has an invalid runtime package manifest');
 }
-const prereleasePackages = Object.entries(next.packages ?? {})
-  .filter(([, version]) => !/^\d+\.\d+\.\d+$/.test(String(version)))
-  .map(([name, version]) => `${name}@${version}`);
-if (prereleasePackages.length) {
-  throw new Error(
-    `Production image contains non-stable packages: ${prereleasePackages.join(', ')}`,
-  );
-}
+const nextRelease = validateRuntimePackageChannel(next);
 const names = [
   ...new Set([
     ...Object.keys(previous.packages ?? {}),
@@ -40,6 +34,8 @@ const result = {
   schema: 'tradejs-runtime-package-diff/v1',
   previousProjectSha: previous.projectSha ?? null,
   nextProjectSha: next.projectSha ?? null,
+  nextReleaseChannel: nextRelease.releaseChannel,
+  nextFrameworkVersion: nextRelease.frameworkVersion,
   changedPackages,
   changedStrategies: changedPackages.filter((entry) =>
     entry.name.startsWith('@tradejs/strategy-'),

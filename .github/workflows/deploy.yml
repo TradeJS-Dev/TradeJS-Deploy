@@ -1,4 +1,5 @@
 name: Deploy Project app
+run-name: Deploy Project ${{ inputs.project_sha || github.event.client_payload.project_sha }}
 
 on:
   workflow_dispatch:

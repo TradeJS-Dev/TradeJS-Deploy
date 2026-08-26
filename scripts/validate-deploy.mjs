@@ -40,7 +40,10 @@ assert(
 
 assert(
   workflow.includes('tradejs-project-image-published') &&
-    !workflow.includes('tradejs-images-published'),
+    !workflow.includes('tradejs-images-published') &&
+    workflow.includes(
+      'run-name: Deploy Project ${{ inputs.project_sha || github.event.client_payload.project_sha }}',
+    ),
   'Deploy must accept only the immutable Project image event',
 );
 assert(
@@ -271,7 +274,10 @@ assert(
     workflow.includes('runtime-package-manifest.json') &&
     workflow.includes('compare-runtime-manifests.mjs') &&
     read('scripts/compare-runtime-manifests.mjs').includes(
-      'Production image contains non-stable packages',
+      'validateRuntimePackageChannel',
+    ) &&
+    read('scripts/runtime-package-channel.mjs').includes(
+      'Production framework packages do not form one release cohort',
     ) &&
     workflow.includes('release.env.previous') &&
     workflow.includes('rollback_app') &&
