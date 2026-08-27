@@ -22,15 +22,21 @@ from source and it does not depend directly on npm package publishing.
 - Every app image contains `/app/runtime-package-manifest.json`. Deploy stores
   and compares old/new manifests so package changes are explicit alongside the
   Git-owned computed `strategyRevision` and `deploymentCompositionId` changes.
-- Production Project images contain only exact stable npm versions. Beta packages
-  are exercised in isolated production-like smoke containers; the weekly
-  Project composition sync batches promoted `latest` packages into one image
-  before Deploy sees any new app SHA.
+- Production Project images contain one exact framework cohort: either a
+  canonical stable version or one verified `x.y.z-beta.N` version shared by
+  every framework package. Base, Strategy Kit, and strategy packages remain
+  exact and stable-only. Deploy rejects mixed framework versions and every
+  other prerelease shape.
 - The app image supervises Next.js, the signals daemon, and the market WebSocket gateway. The compose healthcheck requires both ports `3000` and `3001` to be healthy, while Nginx proxies `/ws/market` to the gateway with WebSocket upgrade headers.
 - Deploy waits for the updated app container to become healthy, runs
   `runtime-control verify`, prints logs and rolls back both the app image and
   runtime env on failure, then validates Nginx with `nginx -t`.
 - Deployment ensures a persistent 4 GB `/swapfile`, caps the main service containers through Compose memory limits, and keeps runtime signals for three days by default.
+- After the daily runtime-evidence window closes, the server replays that
+  window with the exact image digest recorded by the evidence bundle. The
+  replay runs with a read-only Timescale role, an isolated Redis instance,
+  bounded resources, and no exchange-facing transport; its image lease is
+  retained until the feedback artifact is collected.
 - Redis Stack is pinned to `7.4.0-v8`, uses AOF (`everysec`) plus RDB snapshots, and is backed up with a restore drill before deploys and once per day. Backups are retained under `~/backups/redis` for 14 days by default.
 - Redis explicitly uses `/data/dump.rdb`, making the named `redisdata` volume the sole persistence location. A deployment is rejected when Redis uses any other persistence path. The persistent-key count must match after Redis is recreated.
 - `TradeJS-Site` and `TradeJS-Docs` publish full-SHA images without server
