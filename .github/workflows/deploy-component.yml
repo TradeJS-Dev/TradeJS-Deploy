@@ -61,6 +61,16 @@ jobs:
           source: "docker-compose.prod.yml,scripts/release-state.sh"
           target: ~/
 
+      - name: Copy Nginx config for web component rollout
+        if: ${{ inputs.component == 'site' || inputs.component == 'docs' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "nginx/nginx.conf.ssl"
+          target: ~/
+
       - name: Deploy exact component image
         uses: appleboy/ssh-action@v1.0.3
         env:
