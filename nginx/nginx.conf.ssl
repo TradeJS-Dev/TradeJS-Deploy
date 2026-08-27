@@ -179,6 +179,7 @@ http {
     server {
         listen 443 ssl;
         server_name docs.tradejs.dev;
+        http2 on;
 
         ssl_certificate /etc/letsencrypt/live/tradejs.dev/fullchain.pem;
         ssl_certificate_key /etc/letsencrypt/live/tradejs.dev/privkey.pem;
