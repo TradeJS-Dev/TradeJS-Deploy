@@ -11,7 +11,9 @@ readonly image_repository="ghcr.io/tradejs-dev/tradejs-project-app"
 readonly redis_image="redis/redis-stack:7.4.0-v8"
 readonly lock_file="${RUNTIME_FEEDBACK_LOCK_FILE:-$HOME/.runtime-feedback.lock}"
 readonly max_bundles="${RUNTIME_FEEDBACK_MAX_BUNDLES_PER_RUN:-3}"
-readonly minimum_available_kb="${RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-4194304}"
+readonly minimum_available_kb="${RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-6291456}"
+readonly replay_memory="${RUNTIME_FEEDBACK_REPLAY_MEMORY:-5g}"
+readonly replay_node_heap_mb="${RUNTIME_FEEDBACK_NODE_HEAP_MB:-4096}"
 readonly lease_days="${RUNTIME_FEEDBACK_IMAGE_RETENTION_DAYS:-30}"
 
 requested_artifact=""
@@ -36,8 +38,12 @@ if [ -n "$requested_artifact" ] && [[ ! "$requested_artifact" =~ ^[a-zA-Z0-9._-]
   echo "Invalid artifact id: $requested_artifact" >&2
   exit 1
 fi
-if [[ ! "$max_bundles" =~ ^[1-9][0-9]*$ ]] || [[ ! "$lease_days" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Runtime feedback limits must be positive integers" >&2
+if [[ ! "$max_bundles" =~ ^[1-9][0-9]*$ ]] || \
+  [[ ! "$minimum_available_kb" =~ ^[1-9][0-9]*$ ]] || \
+  [[ ! "$replay_memory" =~ ^[1-9][0-9]*[mMgG]$ ]] || \
+  [[ ! "$replay_node_heap_mb" =~ ^[1-9][0-9]*$ ]] || \
+  [[ ! "$lease_days" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Runtime feedback limits are invalid" >&2
   exit 1
 fi
 if [ ! -f "$feedback_env_file" ]; then
@@ -66,7 +72,9 @@ if [ -z "$available_kb" ] || [ "$available_kb" -lt "$minimum_available_kb" ]; th
 fi
 docker network inspect "$network" >/dev/null
 
+attempted=0
 processed=0
+failed=0
 while IFS= read -r complete_file; do
   bundle_dir="$(dirname "$complete_file")"
   artifact_hint="$(basename "$bundle_dir")"
@@ -163,10 +171,12 @@ while IFS= read -r complete_file; do
   }
 
   set +e
+  attempted=$((attempted + 1))
   timeout --signal=TERM --kill-after=30s 2h docker run --rm --pull=never \
     --name "$replay_name" --user 1000:1000 --network "$network" \
     --read-only --tmpfs /tmp:rw,noexec,nosuid,size=256m \
-    --memory 3g --memory-swap 3g --cpus 1.5 --pids-limit 256 \
+    --memory "$replay_memory" --memory-swap "$replay_memory" \
+    --cpus 1.5 --pids-limit 256 \
     --cap-drop ALL --security-opt no-new-privileges:true \
     --env-file "$feedback_env_file" \
     -e PROJECT_CWD=/app -e DOTENV_CONFIG_PATH=/nonexistent \
@@ -178,7 +188,7 @@ while IFS= read -r complete_file; do
     -e RUNTIME_FEEDBACK_ISOLATED_REDIS=true \
     -e MAKE_ORDERS=false -e TRADEJS_EXTERNAL_ORDER_PLACEMENT=false \
     -e TRADEJS_PROJECT_IMAGE_DIGEST="$image_digest" \
-    -e NODE_OPTIONS=--max-old-space-size=2560 \
+    -e NODE_OPTIONS="--max-old-space-size=$replay_node_heap_mb" \
     -v "$bundle_dir:/runtime-evidence:ro" \
     -v "$incoming_dir:/runtime-feedback-output:rw" \
     -v "$work_dir:/app/data:rw" \
@@ -196,7 +206,9 @@ while IFS= read -r complete_file; do
     mv "$incoming_dir" "$failed_dir"
     rm -rf "$work_dir"
     echo "Runtime feedback replay failed: $artifact_hint (status=$replay_status)" >&2
-    exit 1
+    failed=$((failed + 1))
+    [ "$attempted" -lt "$max_bundles" ] || break
+    continue
   fi
 
   date_path="$(date -u -d "@$((end_time / 1000))" +%Y/%m/%d)"
@@ -218,9 +230,13 @@ while IFS= read -r complete_file; do
 
   echo "Runtime feedback replay ready: $ready_dir"
   processed=$((processed + 1))
-  [ "$processed" -lt "$max_bundles" ] || break
+  [ "$attempted" -lt "$max_bundles" ] || break
 done < <(find "$evidence_root" -type f -name .complete -print 2>/dev/null | sort)
 
-if [ "$processed" -eq 0 ]; then
+if [ "$attempted" -eq 0 ]; then
   echo "No pending runtime evidence bundles."
+fi
+if [ "$failed" -gt 0 ]; then
+  echo "Runtime feedback replay completed with failures: attempted=$attempted failed=$failed ready=$processed" >&2
+  exit 1
 fi
