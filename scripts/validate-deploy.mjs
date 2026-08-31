@@ -147,9 +147,9 @@ assert(
     runtimeFeedbackReplay.includes(
       'TRADEJS_EXTERNAL_ORDER_PLACEMENT=false',
     ) &&
-    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-6291456') &&
-    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_REPLAY_MEMORY:-5g') &&
-    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_NODE_HEAP_MB:-4096') &&
+    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-7340032') &&
+    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_REPLAY_MEMORY:-7g') &&
+    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_NODE_HEAP_MB:-6144') &&
     runtimeFeedbackReplay.includes('--memory "$replay_memory"') &&
     runtimeFeedbackReplay.includes('--cpus 1.5') &&
     runtimeFeedbackReplay.includes('$bundle_dir:/runtime-evidence:ro') &&

@@ -73,10 +73,10 @@ test('reserves enough memory for the full-universe replay heap', () => {
 
   assert.match(
     script,
-    /RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-6291456/,
+    /RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-7340032/,
   );
-  assert.match(script, /RUNTIME_FEEDBACK_REPLAY_MEMORY:-5g/);
-  assert.match(script, /RUNTIME_FEEDBACK_NODE_HEAP_MB:-4096/);
+  assert.match(script, /RUNTIME_FEEDBACK_REPLAY_MEMORY:-7g/);
+  assert.match(script, /RUNTIME_FEEDBACK_NODE_HEAP_MB:-6144/);
   assert.match(script, /--memory "\$replay_memory" --memory-swap "\$replay_memory"/);
   assert.match(
     script,
