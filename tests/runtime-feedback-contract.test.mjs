@@ -55,6 +55,7 @@ test('all runtime feedback shell entrypoints pass syntax validation', () => {
     'docker-image-prune.sh',
     'ensure-runtime-feedback-db.sh',
     'install-runtime-feedback-cron.sh',
+    'runtime-feedback-maintenance.sh',
     'runtime-feedback-replay.sh',
     'set-runtime-image-digest.sh',
   ]) {
@@ -63,6 +64,99 @@ test('all runtime feedback shell entrypoints pass syntax validation', () => {
     });
     assert.equal(result.status, 0, `${file}: ${result.stderr}`);
   }
+});
+
+test('retains unresolved replay failures and rotates bounded runtime feedback logs', (t) => {
+  const fixtureRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'tradejs-runtime-feedback-maintenance-'),
+  );
+  const feedbackRoot = path.join(fixtureRoot, 'runtime-feedback');
+  const failedRoot = path.join(feedbackRoot, 'failed');
+  const completedRoot = path.join(feedbackRoot, 'completed', 'production');
+  const logPath = path.join(feedbackRoot, 'cron.log');
+  const completedArtifact =
+    '20260827T180000Z_20260828T180000Z_55bc3be1ddb7fd86';
+  const unresolvedArtifact =
+    '20260828T180000Z_20260829T180000Z_4b4a95e05dd8595e';
+  const oldCompletedFailure = `${completedArtifact}-20260829T182003Z-a655022cff83`;
+  const recentCompletedFailure = `${completedArtifact}-20260830T182003Z-a655022cff83`;
+  const oldUnresolvedFailure = `${unresolvedArtifact}-20260829T182003Z-8e21d6691dc6`;
+  const nowEpoch = 1_788_200_000;
+  const oldEpoch = nowEpoch - 10 * 86_400;
+  const recentEpoch = nowEpoch - 2 * 86_400;
+
+  fs.mkdirSync(completedRoot, { recursive: true });
+  for (const entry of [
+    oldCompletedFailure,
+    recentCompletedFailure,
+    oldUnresolvedFailure,
+  ]) {
+    fs.mkdirSync(path.join(failedRoot, entry), { recursive: true });
+  }
+  fs.writeFileSync(
+    path.join(completedRoot, `${completedArtifact}.json`),
+    '{}\n',
+  );
+  fs.utimesSync(
+    path.join(failedRoot, oldCompletedFailure),
+    oldEpoch,
+    oldEpoch,
+  );
+  fs.utimesSync(
+    path.join(failedRoot, recentCompletedFailure),
+    recentEpoch,
+    recentEpoch,
+  );
+  fs.utimesSync(
+    path.join(failedRoot, oldUnresolvedFailure),
+    oldEpoch,
+    oldEpoch,
+  );
+  fs.writeFileSync(logPath, 'x'.repeat(32));
+  fs.writeFileSync(`${logPath}.old`, 'old log');
+  fs.utimesSync(`${logPath}.old`, oldEpoch, oldEpoch);
+  t.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const result = spawnSync(
+    'bash',
+    [path.join(root, 'scripts/runtime-feedback-maintenance.sh')],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        HOME: fixtureRoot,
+        RUNTIME_FEEDBACK_ROOT: feedbackRoot,
+        RUNTIME_FEEDBACK_LOG_PATH: logPath,
+        RUNTIME_FEEDBACK_FAILED_RETENTION_DAYS: '7',
+        RUNTIME_FEEDBACK_LOG_RETENTION_DAYS: '7',
+        RUNTIME_FEEDBACK_LOG_MAX_BYTES: '16',
+        RUNTIME_FEEDBACK_MAINTENANCE_NOW_EPOCH: String(nowEpoch),
+      },
+      encoding: 'utf8',
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    fs.existsSync(path.join(failedRoot, oldCompletedFailure)),
+    false,
+  );
+  assert.equal(
+    fs.existsSync(path.join(failedRoot, recentCompletedFailure)),
+    true,
+  );
+  assert.equal(
+    fs.existsSync(path.join(failedRoot, oldUnresolvedFailure)),
+    true,
+  );
+  assert.equal(fs.readFileSync(logPath, 'utf8'), '');
+  assert.equal(fs.existsSync(`${logPath}.old`), false);
+  assert.equal(
+    fs
+      .readdirSync(feedbackRoot)
+      .some((entry) => entry.startsWith('cron.log.2026')),
+    true,
+  );
 });
 
 test('reserves enough memory for the full-universe replay heap', () => {

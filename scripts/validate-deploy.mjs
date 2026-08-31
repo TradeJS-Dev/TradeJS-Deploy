@@ -19,6 +19,9 @@ const legacyCleanup = read('scripts/cleanup-legacy-runtime-redis.sh');
 const runtimeFeedbackReplay = read('scripts/runtime-feedback-replay.sh');
 const runtimeFeedbackDb = read('scripts/ensure-runtime-feedback-db.sh');
 const runtimeFeedbackCron = read('scripts/install-runtime-feedback-cron.sh');
+const runtimeFeedbackMaintenance = read(
+  'scripts/runtime-feedback-maintenance.sh',
+);
 const runtimeImageDigest = read('scripts/set-runtime-image-digest.sh');
 const dockerImagePrune = read('scripts/docker-image-prune.sh');
 const packageJson = JSON.parse(read('package.json'));
@@ -158,9 +161,20 @@ assert(
   'Runtime feedback replay must use the exact image with hard resource and IO boundaries',
 );
 assert(
-  runtimeFeedbackCron.includes('20 21 * * *') &&
+  runtimeFeedbackCron.includes('10 21 * * *') &&
+    runtimeFeedbackCron.includes('runtime-feedback-maintenance.sh') &&
+    runtimeFeedbackCron.includes('20 21 * * *') &&
     runtimeFeedbackCron.includes('CRON_TZ=Europe/Moscow'),
   'Runtime feedback replay must run only after the daily evidence window closes',
+);
+assert(
+  runtimeFeedbackMaintenance.includes('RUNTIME_FEEDBACK_FAILED_RETENTION_DAYS:-30') &&
+    runtimeFeedbackMaintenance.includes('RUNTIME_FEEDBACK_LOG_RETENTION_DAYS:-30') &&
+    runtimeFeedbackMaintenance.includes('RUNTIME_FEEDBACK_LOG_MAX_BYTES:-10485760') &&
+    runtimeFeedbackMaintenance.includes('completed_root/$artifact_id.json') &&
+    runtimeFeedbackMaintenance.includes('rm -rf -- "$failed_dir"') &&
+    runtimeFeedbackMaintenance.includes('mv "$log_path" "$rotated_log"'),
+  'Runtime feedback maintenance must retain unresolved failures and bound cron logs',
 );
 assert(
   dockerImagePrune.includes('tradejs.runtime-feedback.image-lease=true') &&
