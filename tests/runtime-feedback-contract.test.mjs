@@ -81,7 +81,7 @@ test('retains unresolved replay failures and rotates bounded runtime feedback lo
   const oldCompletedFailure = `${completedArtifact}-20260829T182003Z-a655022cff83`;
   const recentCompletedFailure = `${completedArtifact}-20260830T182003Z-a655022cff83`;
   const oldUnresolvedFailure = `${unresolvedArtifact}-20260829T182003Z-8e21d6691dc6`;
-  const nowEpoch = 1_788_200_000;
+  const nowEpoch = Math.floor(Date.now() / 1_000);
   const oldEpoch = nowEpoch - 10 * 86_400;
   const recentEpoch = nowEpoch - 2 * 86_400;
 
@@ -130,7 +130,6 @@ test('retains unresolved replay failures and rotates bounded runtime feedback lo
         RUNTIME_FEEDBACK_FAILED_RETENTION_DAYS: '7',
         RUNTIME_FEEDBACK_LOG_RETENTION_DAYS: '7',
         RUNTIME_FEEDBACK_LOG_MAX_BYTES: '16',
-        RUNTIME_FEEDBACK_MAINTENANCE_NOW_EPOCH: String(nowEpoch),
       },
       encoding: 'utf8',
     },
@@ -154,7 +153,11 @@ test('retains unresolved replay failures and rotates bounded runtime feedback lo
   assert.equal(
     fs
       .readdirSync(feedbackRoot)
-      .some((entry) => entry.startsWith('cron.log.2026')),
+      .some((entry) =>
+        entry.startsWith(
+          `cron.log.${new Date(nowEpoch * 1_000).getUTCFullYear()}`,
+        ),
+      ),
     true,
   );
 });
@@ -175,6 +178,158 @@ test('reserves enough memory for the full-universe replay heap', () => {
   assert.match(
     script,
     /NODE_OPTIONS="--max-old-space-size=\$replay_node_heap_mb"/,
+  );
+});
+
+test('notifies from a verified ready bundle without exposing Telegram credentials to replay', () => {
+  const script = fs.readFileSync(
+    path.join(root, 'scripts/runtime-feedback-replay.sh'),
+    'utf8',
+  );
+
+  assert.match(script, /runtime-feedback-notify --bundle/);
+  assert.match(script, /notified\/\$deployment_id/);
+  assert.ok(
+    script.indexOf('mv "$incoming_dir" "$ready_dir"') <
+      script.lastIndexOf(
+        'notify_ready_bundle "$artifact_hint" "$ready_dir"',
+      ),
+  );
+  assert.doesNotMatch(script, /-e TG_BOT_TOKEN=/);
+});
+
+test('retries only notification for an already completed replay and records it once', (t) => {
+  const fixtureRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'tradejs-runtime-feedback-notify-'),
+  );
+  const binRoot = path.join(fixtureRoot, 'bin');
+  const evidenceRoot = path.join(fixtureRoot, 'evidence');
+  const feedbackRoot = path.join(fixtureRoot, 'feedback');
+  const envFile = path.join(fixtureRoot, 'runtime-feedback.env');
+  const dockerLog = path.join(fixtureRoot, 'docker.log');
+  const notifyAttempt = path.join(fixtureRoot, 'notify-attempt');
+  const artifact = '20260828T180000Z_20260829T180000Z_notify';
+  const evidenceBundle = path.join(evidenceRoot, artifact);
+  const readyBundle = path.join(
+    feedbackRoot,
+    'ready',
+    'production',
+    '2026',
+    '08',
+    '29',
+    artifact,
+    'run-1',
+  );
+
+  fs.mkdirSync(binRoot);
+  fs.mkdirSync(evidenceBundle, { recursive: true });
+  fs.mkdirSync(readyBundle, { recursive: true });
+  fs.mkdirSync(path.join(feedbackRoot, 'completed', 'production'), {
+    recursive: true,
+  });
+  fs.mkdirSync(path.join(feedbackRoot, 'notify-pending', 'production'), {
+    recursive: true,
+  });
+  fs.writeFileSync(path.join(evidenceBundle, '.complete'), '');
+  fs.writeFileSync(path.join(readyBundle, '.complete'), 'sealed\n');
+  fs.writeFileSync(
+    path.join(feedbackRoot, 'completed', 'production', `${artifact}.json`),
+    '{}\n',
+  );
+  fs.writeFileSync(
+    path.join(feedbackRoot, 'notify-pending', 'production', artifact),
+    `${readyBundle}\n`,
+  );
+  fs.writeFileSync(envFile, 'PG_USER=runtime_replay\n');
+  fs.writeFileSync(
+    path.join(binRoot, 'flock'),
+    '#!/usr/bin/env bash\nexit 0\n',
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    path.join(binRoot, 'awk'),
+    `#!/usr/bin/env bash
+if [ "\${*: -1}" = "/proc/meminfo" ]; then
+  printf '9999999\\n'
+  exit 0
+fi
+exec /usr/bin/awk "$@"
+`,
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    path.join(binRoot, 'docker'),
+    `#!/usr/bin/env bash
+set -eu
+printf '%s\\n' "$*" >> "$RUNTIME_FEEDBACK_TEST_DOCKER_LOG"
+if [ "\${1:-}" = "inspect" ]; then
+  printf 'healthy\\n'
+  exit 0
+fi
+if [ "\${1:-}" = "network" ]; then
+  exit 0
+fi
+if [ "\${1:-}" = "exec" ]; then
+  if [ ! -f "$RUNTIME_FEEDBACK_TEST_NOTIFY_ATTEMPT" ]; then
+    : > "$RUNTIME_FEEDBACK_TEST_NOTIFY_ATTEMPT"
+    exit 42
+  fi
+  exit 0
+fi
+exit 91
+`,
+    { mode: 0o755 },
+  );
+  t.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const run = () =>
+    spawnSync('bash', [path.join(root, 'scripts/runtime-feedback-replay.sh')], {
+      cwd: root,
+      env: {
+        ...process.env,
+        HOME: fixtureRoot,
+        PATH: `${binRoot}:${process.env.PATH}`,
+        RUNTIME_EVIDENCE_READY_DIR: evidenceRoot,
+        RUNTIME_FEEDBACK_ROOT: feedbackRoot,
+        RUNTIME_FEEDBACK_ENV_FILE: envFile,
+        RUNTIME_FEEDBACK_LOCK_FILE: path.join(fixtureRoot, 'feedback.lock'),
+        RUNTIME_FEEDBACK_MIN_AVAILABLE_KB: '1',
+        RUNTIME_FEEDBACK_TEST_DOCKER_LOG: dockerLog,
+        RUNTIME_FEEDBACK_TEST_NOTIFY_ATTEMPT: notifyAttempt,
+      },
+      encoding: 'utf8',
+    });
+
+  const first = run();
+  const second = run();
+  const third = run();
+
+  assert.equal(first.status, 1, first.stderr);
+  assert.match(first.stderr, /notification failed/);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(third.status, 0, third.stderr);
+  const dockerCalls = fs.readFileSync(dockerLog, 'utf8');
+  assert.equal(
+    dockerCalls.match(/runtime-feedback-notify --bundle/g)?.length,
+    2,
+  );
+  assert.doesNotMatch(dockerCalls, /^run /m);
+  assert.match(
+    dockerCalls,
+    new RegExp(
+      `runtime-feedback-notify --bundle /app/data/runtime-feedback/ready/production/2026/08/29/${artifact}/run-1`,
+    ),
+  );
+  assert.equal(
+    fs.existsSync(
+      path.join(
+        feedbackRoot,
+        'notified',
+        'production',
+        `${artifact}.json`,
+      ),
+    ),
+    true,
   );
 });
 

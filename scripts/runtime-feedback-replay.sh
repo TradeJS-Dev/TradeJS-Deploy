@@ -5,6 +5,7 @@ set -Eeuo pipefail
 readonly deployment_id="${RUNTIME_FEEDBACK_DEPLOYMENT_ID:-production}"
 readonly evidence_root="${RUNTIME_EVIDENCE_READY_DIR:-$HOME/data/runtime-evidence/ready/$deployment_id}"
 readonly feedback_root="${RUNTIME_FEEDBACK_ROOT:-$HOME/data/runtime-feedback}"
+readonly app_feedback_root="${RUNTIME_FEEDBACK_APP_ROOT:-/app/data/runtime-feedback}"
 readonly feedback_env_file="${RUNTIME_FEEDBACK_ENV_FILE:-$HOME/.runtime-feedback.env}"
 readonly network="${RUNTIME_FEEDBACK_NETWORK:-tradejs-runtime-replay}"
 readonly image_repository="ghcr.io/tradejs-dev/tradejs-project-app"
@@ -53,7 +54,8 @@ fi
 
 mkdir -p "$feedback_root/incoming" "$feedback_root/ready/$deployment_id" \
   "$feedback_root/failed" "$feedback_root/completed/$deployment_id" \
-  "$feedback_root/work"
+  "$feedback_root/notify-pending/$deployment_id" \
+  "$feedback_root/notified/$deployment_id" "$feedback_root/work"
 exec 9>"$lock_file"
 flock -n 9 || {
   echo "Another runtime feedback replay is already running."
@@ -75,6 +77,48 @@ docker network inspect "$network" >/dev/null
 attempted=0
 processed=0
 failed=0
+notification_failed=0
+
+notify_ready_bundle() {
+  local artifact_id="$1"
+  local ready_bundle="$2"
+  local notification_file="$feedback_root/notified/$deployment_id/$artifact_id.json"
+  local pending_file="$feedback_root/notify-pending/$deployment_id/$artifact_id"
+  local container_bundle
+  local notification_tmp
+  local notification_status
+
+  if [ -f "$notification_file" ]; then
+    rm -f "$pending_file"
+    return 0
+  fi
+  case "$ready_bundle" in
+    "$feedback_root"/*)
+      container_bundle="$app_feedback_root/${ready_bundle#"$feedback_root"/}"
+      ;;
+    *)
+      echo "Runtime feedback bundle is outside the shared data root: $ready_bundle" >&2
+      return 1
+      ;;
+  esac
+
+  set +e
+  docker exec app /app/node_modules/.bin/tradejs runtime-feedback-notify --bundle "$container_bundle"
+  notification_status=$?
+  set -e
+  if [ "$notification_status" -ne 0 ]; then
+    echo "Runtime feedback notification failed: $artifact_id (status=$notification_status)" >&2
+    return 1
+  fi
+
+  notification_tmp="${notification_file}.tmp-$$"
+  printf '{"schemaVersion":1,"runtimeEvidenceArtifactId":"%s","runtimeFeedbackBundle":"%s","notifiedAt":%s}\n' \
+    "$artifact_id" "$ready_bundle" "$(date +%s000)" > "$notification_tmp"
+  mv "$notification_tmp" "$notification_file"
+  rm -f "$pending_file"
+  echo "Runtime feedback notification sent: $ready_bundle"
+}
+
 while IFS= read -r complete_file; do
   bundle_dir="$(dirname "$complete_file")"
   artifact_hint="$(basename "$bundle_dir")"
@@ -83,6 +127,13 @@ while IFS= read -r complete_file; do
   fi
   completion_file="$feedback_root/completed/$deployment_id/$artifact_hint.json"
   if [ "$rerun" != true ] && [ -f "$completion_file" ]; then
+    pending_file="$feedback_root/notify-pending/$deployment_id/$artifact_hint"
+    if [ -f "$pending_file" ]; then
+      IFS= read -r ready_dir < "$pending_file"
+      if ! notify_ready_bundle "$artifact_hint" "$ready_dir"; then
+        notification_failed=$((notification_failed + 1))
+      fi
+    fi
     continue
   fi
 
@@ -228,15 +279,23 @@ while IFS= read -r complete_file; do
     "$artifact_hint" "$ready_dir" "$(date +%s000)" > "$receipt_tmp"
   mv "$receipt_tmp" "$completion_file"
 
+  pending_file="$feedback_root/notify-pending/$deployment_id/$artifact_hint"
+  pending_tmp="${pending_file}.tmp-$$"
+  printf '%s\n' "$ready_dir" > "$pending_tmp"
+  mv "$pending_tmp" "$pending_file"
+
   echo "Runtime feedback replay ready: $ready_dir"
   processed=$((processed + 1))
+  if ! notify_ready_bundle "$artifact_hint" "$ready_dir"; then
+    notification_failed=$((notification_failed + 1))
+  fi
   [ "$attempted" -lt "$max_bundles" ] || break
 done < <(find "$evidence_root" -type f -name .complete -print 2>/dev/null | sort)
 
 if [ "$attempted" -eq 0 ]; then
   echo "No pending runtime evidence bundles."
 fi
-if [ "$failed" -gt 0 ]; then
-  echo "Runtime feedback replay completed with failures: attempted=$attempted failed=$failed ready=$processed" >&2
+if [ "$failed" -gt 0 ] || [ "$notification_failed" -gt 0 ]; then
+  echo "Runtime feedback replay completed with failures: attempted=$attempted failed=$failed ready=$processed notificationFailed=$notification_failed" >&2
   exit 1
 fi
