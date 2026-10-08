@@ -148,6 +148,7 @@ jobs:
               exit 1
             }
 
+            ./scripts/mcp-worker-control.sh stop || rollback_app
             mv runtime.env.incoming .env || rollback_app
             RELEASE_STATE_FILE=release.env ./scripts/release-state.sh update app "$DEPLOY_PROJECT_SHA" "$DEPLOY_PROJECT_SHA" || rollback_app
 
@@ -218,6 +219,7 @@ jobs:
             ' || rollback_app
 
             docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production || rollback_app
+            ./scripts/mcp-worker-control.sh reconcile || rollback_app
             ./scripts/install-runtime-feedback-cron.sh || rollback_app
             docker exec nginx nginx -t
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps app

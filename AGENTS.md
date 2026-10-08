@@ -62,3 +62,12 @@ persistent volumes, infrastructure containers, and server-only secrets.
 Run `yarn checks` before every commit. For Compose changes, also run
 `docker compose -f docker-compose.prod.yml config` with a secret-free local env
 when practical.
+
+## MCP worker rollout
+
+The optional `mcp` Compose profile runs the exact app image's `mcp-worker` and
+an ephemeral isolated replay Redis. Enable it only with an app release cohort
+that includes `mcp-worker`. Do not mount a Docker socket or SSH credentials.
+Runtime-feedback subprocesses must strip AI/exchange/agent credentials, use
+read-only Timescale and the isolated Redis. Keep the worker's memory/CPU limits
+separate from trading. Apply the complete release-range rules before rollout.

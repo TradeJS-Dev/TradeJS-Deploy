@@ -24,3 +24,7 @@ APP_IMAGE_TAG="$rollback_app_image_tag" docker compose \
   --env-file "$release_env_file" \
   -f docker-compose.prod.yml \
   up -d --no-deps --force-recreate app
+
+if [ -x ./scripts/mcp-worker-control.sh ]; then
+  APP_IMAGE_TAG="$rollback_app_image_tag" ./scripts/mcp-worker-control.sh reconcile
+fi

@@ -311,3 +311,14 @@ assert(
 );
 
 console.log('Validated canonical TradeJS production deployment.');
+
+const mcpWorkerControl = read('scripts/mcp-worker-control.sh');
+assert(
+  workflow.includes('./scripts/mcp-worker-control.sh stop || rollback_app') &&
+    workflow.includes('./scripts/mcp-worker-control.sh reconcile || rollback_app') &&
+    initializeWorkflow.includes('./scripts/mcp-worker-control.sh reconcile') &&
+    appRollback.includes('./scripts/mcp-worker-control.sh reconcile') &&
+    mcpWorkerControl.includes('heartbeat.packageManifestSha256 !== hash') &&
+    compose.includes('MCP_REPLAY_REDIS_HOST: mcp-replay-redis'),
+  'MCP worker rollout/rollback must follow the exact app composition with isolated replay storage',
+);

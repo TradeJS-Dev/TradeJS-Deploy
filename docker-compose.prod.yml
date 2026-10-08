@@ -39,6 +39,51 @@ services:
         max-size: 10m
         max-file: "3"
 
+  mcp-worker:
+    profiles: [mcp]
+    restart: unless-stopped
+    image: ghcr.io/tradejs-dev/tradejs-project-app:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
+    entrypoint: ["/usr/bin/dumb-init", "--"]
+    command: ["./node_modules/.bin/tradejs", "mcp-worker"]
+    mem_limit: ${MCP_WORKER_MEMORY_LIMIT:-2g}
+    cpus: 1
+    stop_grace_period: 15s
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescale:
+        condition: service_healthy
+      mcp-replay-redis:
+        condition: service_healthy
+    env_file:
+      - .env
+      - release.env
+    environment:
+      MCP_REPLAY_REDIS_HOST: mcp-replay-redis
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    networks: [web]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  mcp-replay-redis:
+    profiles: [mcp]
+    image: redis/redis-stack:7.4.0-v8
+    restart: unless-stopped
+    mem_limit: 512m
+    command: ["redis-stack-server", "--save", "", "--appendonly", "no"]
+    tmpfs: ["/data:size=256m"]
+    networks: [web]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   agent:
     container_name: agent
     restart: always
