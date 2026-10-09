@@ -119,6 +119,22 @@ notify_ready_bundle() {
   echo "Runtime feedback notification sent: $ready_bundle"
 }
 
+queue_complete_files() {
+  local complete_file
+  local artifact_id
+  local priority
+
+  while IFS= read -r complete_file; do
+    artifact_id="$(basename "$(dirname "$complete_file")")"
+    priority=0
+    if [ -n "$(find "$feedback_root/failed" -maxdepth 1 -type d -name "${artifact_id}-*" -print -quit)" ]; then
+      priority=1
+    fi
+    printf '%s\t%s\n' "$priority" "$complete_file"
+  done < <(find "$evidence_root" -type f -name .complete -print 2>/dev/null | sort) | \
+    sort -t $'\t' -k1,1n -k2,2 | cut -f2-
+}
+
 while IFS= read -r complete_file; do
   bundle_dir="$(dirname "$complete_file")"
   artifact_hint="$(basename "$bundle_dir")"
@@ -290,7 +306,7 @@ while IFS= read -r complete_file; do
     notification_failed=$((notification_failed + 1))
   fi
   [ "$attempted" -lt "$max_bundles" ] || break
-done < <(find "$evidence_root" -type f -name .complete -print 2>/dev/null | sort)
+done < <(queue_complete_files)
 
 if [ "$attempted" -eq 0 ]; then
   echo "No pending runtime evidence bundles."

@@ -344,6 +344,7 @@ test('records a failed replay without blocking the next evidence bundle', (t) =>
   const dockerLog = path.join(fixtureRoot, 'docker.log');
   const firstArtifact = '20260827T180000Z_20260828T180000Z_first';
   const secondArtifact = '20260828T180000Z_20260829T180000Z_second';
+  const thirdArtifact = '20260829T180000Z_20260830T180000Z_third';
   const projectSha = 'a'.repeat(40);
   const imageDigest = `sha256:${'d'.repeat(64)}`;
 
@@ -351,6 +352,7 @@ test('records a failed replay without blocking the next evidence bundle', (t) =>
   for (const [artifact, endTime] of [
     [firstArtifact, 1787940000000],
     [secondArtifact, 1788026400000],
+    [thirdArtifact, 1788112800000],
   ]) {
     const bundleDir = path.join(evidenceRoot, artifact);
     fs.mkdirSync(bundleDir, { recursive: true });
@@ -457,10 +459,8 @@ exit 0
   );
   t.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 
-  const result = spawnSync(
-    'bash',
-    [path.join(root, 'scripts/runtime-feedback-replay.sh')],
-    {
+  const run = () =>
+    spawnSync('bash', [path.join(root, 'scripts/runtime-feedback-replay.sh')], {
       cwd: root,
       env: {
         ...process.env,
@@ -471,11 +471,13 @@ exit 0
         RUNTIME_FEEDBACK_ENV_FILE: envFile,
         RUNTIME_FEEDBACK_LOCK_FILE: path.join(fixtureRoot, 'feedback.lock'),
         RUNTIME_FEEDBACK_MIN_AVAILABLE_KB: '1',
+        RUNTIME_FEEDBACK_MAX_BUNDLES_PER_RUN: '2',
         RUNTIME_FEEDBACK_TEST_DOCKER_LOG: dockerLog,
       },
       encoding: 'utf8',
-    },
-  );
+    });
+
+  const result = run();
 
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /Runtime feedback replay failed: .*status=134/);
@@ -507,6 +509,14 @@ exit 0
       ),
     ),
     false,
+  );
+  const next = run();
+  assert.equal(next.status, 1, next.stderr);
+  assert.equal(
+    fs.existsSync(
+      path.join(feedbackRoot, 'completed', 'production', `${thirdArtifact}.json`),
+    ),
+    true,
   );
 });
 
