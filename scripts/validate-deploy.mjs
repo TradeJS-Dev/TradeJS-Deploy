@@ -24,6 +24,7 @@ const runtimeFeedbackMaintenance = read(
 );
 const runtimeImageDigest = read('scripts/set-runtime-image-digest.sh');
 const dockerImagePrune = read('scripts/docker-image-prune.sh');
+const dockerImageMaintenance = read('scripts/docker-image-maintenance.py');
 const packageJson = JSON.parse(read('package.json'));
 
 assert(
@@ -177,12 +178,15 @@ assert(
   'Runtime feedback maintenance must retain unresolved failures and bound cron logs',
 );
 assert(
-  dockerImagePrune.includes('tradejs.runtime-feedback.image-lease=true') &&
-    dockerImagePrune.includes('tradejs.runtime-feedback.expires-at') &&
-    dockerImagePrune.includes('docker image prune -a -f') &&
-    maintenanceWorkflow.includes('docker-image-prune.sh') &&
-    !maintenanceWorkflow.includes('docker image prune -a -f'),
-  'Docker maintenance must preserve unexpired replay image leases',
+  dockerImagePrune.includes('exec python3') &&
+    dockerImageMaintenance.includes('tradejs.runtime-feedback.image-lease') &&
+    dockerImageMaintenance.includes('release.env.previous') &&
+    dockerImageMaintenance.includes("docker('image', 'rm', *refs)") &&
+    !dockerImageMaintenance.includes("'prune'") &&
+    maintenanceWorkflow.includes('scripts/docker-image-maintenance.py') &&
+    maintenanceWorkflow.includes('group: production-deploy') &&
+    maintenanceWorkflow.includes('cancel-in-progress: false'),
+  'Docker maintenance must preserve release images and leases and serialize with deploys',
 );
 assert(
   workflow.includes('./scripts/redis-backup.sh --verify') &&

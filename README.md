@@ -52,6 +52,35 @@ from source and it does not depend directly on npm package publishing.
   credentials. Their production rollout happens only through Deploy's typed
   component workflow.
 
+## Docker Maintenance
+
+Run the `Docker Maintenance` workflow to remove old images and expired replay
+lease containers. Set `dry_run` to preview the exact list without deleting
+Docker objects. The server requires Python 3. The workflow shares the deployment
+queue, so cleanup cannot overlap a deployment started through this repository.
+
+Cleanup preserves images referenced by any remaining container, every image in
+`release.env` and `release.env.previous` when present, and the two newest images
+with full-SHA tags for each TradeJS component. Images younger than 24 hours and
+tagged images outside the five TradeJS component repositories are retained.
+Missing or invalid release state, or a declared image missing locally, stops
+cleanup before deletion. Release files are parsed as data, never executed.
+
+Only stopped replay lease containers with a valid, positive expiry in the past
+are removed. Lease expiry and image references are checked again before each
+removal. Changes to release state or image tags stop cleanup. Docker removal
+uses neither force nor volume deletion. The workflow does not modify databases,
+backups, logs, runtime evidence, or deployment configuration.
+
+The job prints its plan, deleted objects, actual change in available disk space,
+and verifies that running containers kept their image, start time, restart count,
+and healthy status. Local execution on the server uses the same entrypoint:
+
+```bash
+~/scripts/docker-image-prune.sh --dry-run
+~/scripts/docker-image-prune.sh
+```
+
 ## Required Secrets
 
 Make every value below available to `TradeJS-Deploy` as a repository secret or

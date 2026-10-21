@@ -3,10 +3,20 @@ on:
   workflow_dispatch:
     inputs:
       prune_images:
-        description: "Prune unused server images while preserving replay leases"
+        description: "Remove old images and expired leases while preserving rollback versions"
         required: true
         default: true
         type: boolean
+
+      dry_run:
+        description: "Show the cleanup plan without deleting Docker objects"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
   prune-images:
@@ -23,15 +33,23 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "scripts/docker-image-prune.sh"
+          source: "scripts/docker-image-prune.sh,scripts/docker-image-maintenance.py"
           target: ~/
 
-      - name: Prune Docker images on server
+      - name: Remove old Docker images and expired leases
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          MAINTENANCE_DRY_RUN: ${{ inputs.dry_run }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          envs: MAINTENANCE_DRY_RUN
           script: |
             chmod +x "$HOME/scripts/docker-image-prune.sh"
-            "$HOME/scripts/docker-image-prune.sh"
+            command -v python3 >/dev/null
+            if [ "$MAINTENANCE_DRY_RUN" = true ]; then
+              "$HOME/scripts/docker-image-prune.sh" --dry-run
+            else
+              "$HOME/scripts/docker-image-prune.sh"
+            fi
