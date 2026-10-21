@@ -229,6 +229,8 @@ jobs:
             }
 
             docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production
+            ./scripts/capture-runtime-verification.sh deploy
+            ./scripts/install-runtime-verification-cron.sh
             ./scripts/mcp-worker-control.sh reconcile
             ./scripts/install-runtime-feedback-cron.sh
             docker exec nginx nginx -t

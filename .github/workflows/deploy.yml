@@ -219,6 +219,8 @@ jobs:
             ' || rollback_app
 
             docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production || rollback_app
+            ./scripts/capture-runtime-verification.sh deploy || rollback_app
+            ./scripts/install-runtime-verification-cron.sh || rollback_app
             ./scripts/mcp-worker-control.sh reconcile || rollback_app
             ./scripts/install-runtime-feedback-cron.sh || rollback_app
             docker exec nginx nginx -t

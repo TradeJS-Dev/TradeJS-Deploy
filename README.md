@@ -31,6 +31,15 @@ from source and it does not depend directly on npm package publishing.
 - Deploy waits for the updated app container to become healthy, runs
   `runtime-control verify`, prints logs and rolls back both the app image and
   runtime env on failure, then validates Nginx with `nginx -t`.
+- A successful app rollout seals a verification receipt in
+  `data/runtime-verification/<user>/<deployment>/<Project SHA>/<composition>/`.
+  It includes the exact package manifest, the digest observed from the running
+  container image, container health, strategy revisions and `runtime-control verify`.
+  `capture-runtime-verification.sh observe` refreshes the observation every five
+  minutes without changing the original `deploymentVerifiedAt`. Observations
+  without a deploy receipt keep that timestamp unknown. MCP exposes the report
+  through read-only `runtime_get_verification`; `fresh=false` or a failed capture
+  is insufficient for promotion. The collector owns Docker access; MCP does not.
 - Deployment ensures a persistent 4 GB `/swapfile`, caps the main service containers through Compose memory limits, and keeps runtime signals for three days by default.
 - After the daily runtime-evidence window closes, the server replays that
   window with the exact image digest recorded by the evidence bundle. The
