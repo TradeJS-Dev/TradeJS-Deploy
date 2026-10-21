@@ -297,10 +297,12 @@ while IFS= read -r complete_file; do
     "$artifact_hint" "$ready_dir" "$(date +%s000)" > "$receipt_tmp"
   mv "$receipt_tmp" "$completion_file"
 
-  pending_file="$feedback_root/notify-pending/$deployment_id/$artifact_hint"
-  pending_tmp="${pending_file}.tmp-$$"
-  printf '%s\n' "$ready_dir" > "$pending_tmp"
-  mv "$pending_tmp" "$pending_file"
+  if [ "${RUNTIME_FEEDBACK_NOTIFY:-true}" != false ]; then
+    pending_file="$feedback_root/notify-pending/$deployment_id/$artifact_hint"
+    pending_tmp="${pending_file}.tmp-$$"
+    printf '%s\n' "$ready_dir" > "$pending_tmp"
+    mv "$pending_tmp" "$pending_file"
+  fi
 
   echo "Runtime feedback replay ready: $ready_dir"
   processed=$((processed + 1))
