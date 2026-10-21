@@ -80,6 +80,7 @@ failed=0
 notification_failed=0
 
 notify_ready_bundle() {
+  [ "${RUNTIME_FEEDBACK_NOTIFY:-true}" != false ] || return 0
   local artifact_id="$1"
   local ready_bundle="$2"
   local notification_file="$feedback_root/notified/$deployment_id/$artifact_id.json"
@@ -218,6 +219,7 @@ while IFS= read -r complete_file; do
     docker rm -f "$replay_name" >/dev/null 2>&1 || true
   }
   trap cleanup_bundle EXIT
+  trap 'exit 143' TERM INT
   docker run -d --pull=never --name "$redis_name" \
     --network "$network" --network-alias "$redis_name" \
     --memory 512m --cpus 0.5 --pids-limit 128 \
@@ -266,7 +268,7 @@ while IFS= read -r complete_file; do
   replay_status=$?
   set -e
   cleanup_bundle
-  trap - EXIT
+  trap - EXIT TERM INT
 
   if [ "$replay_status" -ne 0 ] || [ ! -f "$incoming_dir/.complete" ]; then
     failed_dir="$feedback_root/failed/$artifact_hint-$run_id"

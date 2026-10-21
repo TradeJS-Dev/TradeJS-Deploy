@@ -18,6 +18,8 @@ case "$enabled" in
   true) ;;
   *) echo "MCP_WORKER_ENABLED must be true or false" >&2; exit 1 ;;
 esac
+mkdir -p data/mcp-replay-requests
+python3 ./scripts/mcp-replay-host.py
 "${compose[@]}" pull mcp-worker mcp-replay-redis
 "${compose[@]}" up -d --wait --wait-timeout 60 mcp-replay-redis
 "${compose[@]}" up -d --no-deps --force-recreate mcp-worker

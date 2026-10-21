@@ -10,6 +10,8 @@ const script = path.join(root, 'scripts/mcp-worker-control.sh');
 const fixture = (t, enabled = 'true', tag = 'a'.repeat(40)) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tradejs-mcp-rollout-'));
   fs.mkdirSync(path.join(directory, 'bin'));
+  fs.mkdirSync(path.join(directory, 'scripts'));
+  fs.copyFileSync(path.join(root, 'scripts/mcp-replay-host.py'), path.join(directory, 'scripts/mcp-replay-host.py'));
   fs.writeFileSync(path.join(directory, '.env'), `MCP_WORKER_ENABLED=${enabled}\n`);
   fs.writeFileSync(path.join(directory, 'release.env'), `APP_IMAGE_TAG=${tag}\n`);
   fs.writeFileSync(path.join(directory, 'bin/docker'), '#!/usr/bin/env bash\nprintf "%s %s\\n" "$APP_IMAGE_TAG" "$*" >> "$MCP_TEST_INVOCATIONS"\n', { mode: 0o755 });
