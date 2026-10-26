@@ -52,6 +52,23 @@ from source and it does not depend directly on npm package publishing.
   credentials. Their production rollout happens only through Deploy's typed
   component workflow.
 
+## MCP replay worker
+
+The optional `mcp` Compose profile runs `mcp-worker` from the exact app image
+with its own resource limits and isolated replay Redis. The worker has no Docker
+socket or SSH credentials. It submits a sealed request under the shared
+`data/mcp-replay-requests` directory; the Deploy-owned `mcp-replay-host.py`
+runner validates the artifact and checksum, then executes replay with the
+producer image recorded in the evidence.
+
+`install-runtime-feedback-cron.sh` installs the host runner every minute.
+A missing runner heartbeat or one older than two minutes prevents a new replay.
+Host interruption, cancellation and timeout fail the request without automatic
+retry. Results and host logs remain beside the request. An MCP replay neither
+sends a notification nor adds the artifact to the scheduled notification queue;
+the daily feedback process keeps ownership of its own completion and notification
+markers.
+
 ## Docker Maintenance
 
 Run the `Docker Maintenance` workflow to remove old images and expired replay
