@@ -19,8 +19,13 @@ readonly lease_days="${RUNTIME_FEEDBACK_IMAGE_RETENTION_DAYS:-30}"
 
 requested_artifact=""
 rerun=false
+preflight=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --preflight)
+      preflight=true
+      shift
+      ;;
     --artifact)
       requested_artifact="${2:-}"
       shift 2
@@ -56,10 +61,15 @@ mkdir -p "$feedback_root/incoming" "$feedback_root/ready/$deployment_id" \
   "$feedback_root/failed" "$feedback_root/completed/$deployment_id" \
   "$feedback_root/notify-pending/$deployment_id" \
   "$feedback_root/notified/$deployment_id" "$feedback_root/work"
-exec 9>"$lock_file"
+if [ -n "${RUNTIME_FEEDBACK_LOCK_FD:-}" ]; then
+  [[ "$RUNTIME_FEEDBACK_LOCK_FD" =~ ^[0-9]+$ ]] || exit 1
+  exec 9>&"$RUNTIME_FEEDBACK_LOCK_FD"
+else
+  exec 9>"$lock_file"
+fi
 flock -n 9 || {
   echo "Another runtime feedback replay is already running."
-  exit 0
+  exit 75
 }
 
 app_health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' app 2>/dev/null || true)"
@@ -70,9 +80,10 @@ fi
 available_kb="$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)"
 if [ -z "$available_kb" ] || [ "$available_kb" -lt "$minimum_available_kb" ]; then
   echo "Insufficient host memory for replay: available_kb=${available_kb:-unknown}" >&2
-  exit 1
+  exit 76
 fi
 docker network inspect "$network" >/dev/null
+if [ "$preflight" = true ]; then exit 0; fi
 
 attempted=0
 processed=0

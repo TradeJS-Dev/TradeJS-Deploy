@@ -29,7 +29,7 @@ filtered="$(printf '%s\n' "$existing" | awk -v start="$marker_start" -v end="$ma
   printf 'CRON_TZ=Europe/Moscow\n'
   printf '* * * * * python3 %q >> %q 2>&1\n' "$HOME/scripts/mcp-replay-host.py" "$HOME/data/runtime-feedback/mcp-host.log"
   printf '10 21 * * * %q\n' "$maintenance_script_path"
-  printf '20 21 * * * %q >> %q 2>&1\n' "$script_path" "$log_path"
+  printf '20 21 * * * python3 %q --enqueue-daily >> %q 2>&1\n' "$HOME/scripts/mcp-replay-host.py" "$log_path"
   printf '%s\n' "$marker_end"
 } | crontab -
 
