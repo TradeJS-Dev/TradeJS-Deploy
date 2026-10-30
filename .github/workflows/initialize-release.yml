@@ -233,5 +233,6 @@ jobs:
             ./scripts/install-runtime-verification-cron.sh
             ./scripts/mcp-worker-control.sh reconcile
             ./scripts/install-runtime-feedback-cron.sh
+            bash ./scripts/verify-mptcp-disabled.sh --env-file .env --env-file release.env -f docker-compose.prod.yml
             docker exec nginx nginx -t
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps

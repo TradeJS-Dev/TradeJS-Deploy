@@ -1,5 +1,7 @@
 services:
   app:
+    sysctls:
+      net.mptcp.enabled: "0"
     container_name: app
     restart: always
     mem_limit: ${APP_MEMORY_LIMIT:-5g}
@@ -40,6 +42,8 @@ services:
         max-file: "3"
 
   mcp-worker:
+    sysctls:
+      net.mptcp.enabled: "0"
     profiles: [mcp]
     restart: unless-stopped
     image: ghcr.io/tradejs-dev/tradejs-project-app:${APP_IMAGE_TAG:?APP_IMAGE_TAG is required}
@@ -71,6 +75,8 @@ services:
         max-file: "3"
 
   mcp-replay-redis:
+    sysctls:
+      net.mptcp.enabled: "0"
     profiles: [mcp]
     image: redis/redis-stack:7.4.0-v8
     restart: unless-stopped
@@ -85,6 +91,8 @@ services:
       retries: 10
 
   agent:
+    sysctls:
+      net.mptcp.enabled: "0"
     container_name: agent
     restart: always
     mem_limit: ${AGENT_MEMORY_LIMIT:-4g}
@@ -114,6 +122,8 @@ services:
         max-file: "3"
 
   site:
+    sysctls:
+      net.mptcp.enabled: "0"
     container_name: site
     restart: always
     mem_limit: ${SITE_MEMORY_LIMIT:-512m}
@@ -129,6 +139,8 @@ services:
         max-file: "3"
 
   docs:
+    sysctls:
+      net.mptcp.enabled: "0"
     container_name: docs
     image: ghcr.io/tradejs-dev/tradejs-docs:${DOCS_IMAGE_TAG:?DOCS_IMAGE_TAG is required}
     restart: unless-stopped
@@ -144,6 +156,8 @@ services:
         max-file: "3"
 
   timescale:
+    sysctls:
+      net.mptcp.enabled: "0"
     container_name: inv-timescale
     image: timescale/timescaledb:latest-pg16
     mem_limit: ${TIMESCALE_MEMORY_LIMIT:-4g}
@@ -165,6 +179,8 @@ services:
       - runtime-replay
 
   redis:
+    sysctls:
+      net.mptcp.enabled: "0"
     image: redis/redis-stack:7.4.0-v8
     container_name: inv-redis
     restart: unless-stopped
@@ -198,6 +214,8 @@ services:
       - web
 
   ml-infer:
+    sysctls:
+      net.mptcp.enabled: "0"
     container_name: ml-infer
     image: ghcr.io/tradejs-dev/tradejs-ml-infer:${ML_INFER_IMAGE_TAG:?ML_INFER_IMAGE_TAG is required}
     restart: unless-stopped
@@ -216,6 +234,8 @@ services:
       - runtime-replay
 
   nginx:
+    sysctls:
+      net.mptcp.enabled: "0"
     image: nginx:stable-alpine
     container_name: nginx
     restart: always
@@ -249,6 +269,8 @@ services:
         max-file: "3"
 
   certbot:
+    sysctls:
+      net.mptcp.enabled: "0"
     image: certbot/certbot
     container_name: certbot
     mem_limit: ${CERTBOT_MEMORY_LIMIT:-256m}
@@ -264,6 +286,8 @@ services:
       - web
 
   certbot-cron:
+    sysctls:
+      net.mptcp.enabled: "0"
     image: certbot/certbot
     container_name: certbot-cron
     restart: on-failure

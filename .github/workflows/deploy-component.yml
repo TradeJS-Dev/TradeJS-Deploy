@@ -58,7 +58,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.prod.yml,scripts/release-state.sh"
+          source: "docker-compose.prod.yml,scripts/release-state.sh,scripts/verify-mptcp-disabled.sh"
           target: ~/
 
       - name: Copy Nginx config for web component rollout
@@ -141,4 +141,5 @@ jobs:
             fi
 
             RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
+            bash ./scripts/verify-mptcp-disabled.sh --env-file .env --env-file release.env -f docker-compose.prod.yml || rollback_component
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps "$DEPLOY_COMPONENT"

@@ -223,5 +223,6 @@ jobs:
             ./scripts/install-runtime-verification-cron.sh || rollback_app
             ./scripts/mcp-worker-control.sh reconcile || rollback_app
             ./scripts/install-runtime-feedback-cron.sh || rollback_app
+            bash ./scripts/verify-mptcp-disabled.sh --env-file .env --env-file release.env -f docker-compose.prod.yml || rollback_app
             docker exec nginx nginx -t
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps app
