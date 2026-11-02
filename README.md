@@ -63,11 +63,30 @@ producer image recorded in the evidence.
 
 `install-runtime-feedback-cron.sh` installs the host runner every minute.
 A missing runner heartbeat or one older than two minutes prevents a new replay.
+Host protocol version 2 uses one persistent queue for MCP and daily replay.
+The daily cron publishes requests with `--enqueue-daily`; the minute runner
+executes them under the shared lock. Its heartbeat reports memory readiness.
+Insufficient memory or a busy executor leaves a request waiting rather than
+marking it successful. `RUNTIME_FEEDBACK_MIN_AVAILABLE_KB` defaults to
+`7340032` KiB; readiness does not reserve that memory. Repeated requests for an
+already processed evidence/image pair reuse its recorded result, including a
+failure. Old failures are not silently retried.
+
 Host interruption, cancellation and timeout fail the request without automatic
 retry. Results and host logs remain beside the request. An MCP replay neither
 sends a notification nor adds the artifact to the scheduled notification queue;
 the daily feedback process keeps ownership of its own completion and notification
 markers.
+
+## Container network verification
+
+Compose disables MPTCP with `net.mptcp.enabled=0` in each service's network
+namespace, including `mcp-worker` and `mcp-replay-redis`. App, component and
+initialization workflows run `scripts/verify-mptcp-disabled.sh` after rollout.
+The check requires both the persistent Docker sysctl setting and the observed namespace value to
+be zero for every running Compose container. An empty container set or an
+unreadable namespace fails verification. This check does not establish runtime
+strategy or replay correctness.
 
 ## Docker Maintenance
 
