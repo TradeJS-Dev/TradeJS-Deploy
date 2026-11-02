@@ -78,7 +78,7 @@ services:
     sysctls:
       net.mptcp.enabled: "0"
     profiles: [mcp]
-    image: redis/redis-stack:7.4.0-v8
+    image: ghcr.io/tradejs-dev/tradejs-redis-stack:4029b3b618010c6b2ba65071ddc15ad6c246fa0e
     restart: unless-stopped
     mem_limit: 512m
     command: ["redis-stack-server", "--save", "", "--appendonly", "no"]
@@ -181,7 +181,7 @@ services:
   redis:
     sysctls:
       net.mptcp.enabled: "0"
-    image: redis/redis-stack:7.4.0-v8
+    image: ghcr.io/tradejs-dev/tradejs-redis-stack:4029b3b618010c6b2ba65071ddc15ad6c246fa0e
     container_name: inv-redis
     restart: unless-stopped
     mem_limit: ${REDIS_MEMORY_LIMIT:-4g}

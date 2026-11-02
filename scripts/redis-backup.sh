@@ -3,7 +3,7 @@ set -euo pipefail
 
 backup_root="${REDIS_BACKUP_DIR:-$HOME/backups/redis}"
 retention_days="${REDIS_BACKUP_RETENTION_DAYS:-14}"
-redis_image="redis/redis-stack:7.4.0-v8"
+redis_image="ghcr.io/tradejs-dev/tradejs-redis-stack:4029b3b618010c6b2ba65071ddc15ad6c246fa0e"
 redis_container="${REDIS_CONTAINER:-inv-redis}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_path="$backup_root/dump-$timestamp.rdb"

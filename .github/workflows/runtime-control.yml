@@ -125,7 +125,7 @@ jobs:
                 trap cleanup_audit EXIT
                 docker run --sysctl net.mptcp.enabled=0 -d --name "$audit_name" --user 0 \
                   -v "$backup:/data/dump.rdb:ro" \
-                  redis/redis-stack:7.4.0-v8 \
+                  ghcr.io/tradejs-dev/tradejs-redis-stack:4029b3b618010c6b2ba65071ddc15ad6c246fa0e \
                   redis-stack-server --dir /data --dbfilename dump.rdb \
                   --appendonly no >/dev/null
                 audit_ready=false

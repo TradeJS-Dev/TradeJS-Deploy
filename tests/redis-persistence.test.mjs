@@ -13,7 +13,7 @@ const cleanupScript = path.join(
   root,
   'scripts/cleanup-legacy-runtime-redis.sh',
 );
-const image = 'redis/redis-stack:7.4.0-v8';
+const image = 'ghcr.io/tradejs-dev/tradejs-redis-stack:4029b3b618010c6b2ba65071ddc15ad6c246fa0e';
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {

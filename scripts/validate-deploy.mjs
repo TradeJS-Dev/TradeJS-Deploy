@@ -87,7 +87,7 @@ assert(
   'Production Compose does not use the immutable Project image and secret DB password',
 );
 assert(
-  compose.includes('redis/redis-stack:7.4.0-v8') &&
+  compose.includes('ghcr.io/tradejs-dev/tradejs-redis-stack:4029b3b618010c6b2ba65071ddc15ad6c246fa0e') &&
     !compose.includes('redis/redis-stack:latest') &&
     compose.includes('--dir') &&
     compose.includes('/data') &&
