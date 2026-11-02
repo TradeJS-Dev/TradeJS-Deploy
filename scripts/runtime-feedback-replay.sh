@@ -171,7 +171,7 @@ while IFS= read -r complete_file; do
     continue
   fi
   parser_image_id="$(docker inspect --format '{{.Image}}' app)"
-  metadata="$(docker run --rm --pull=never --network none --read-only \
+  metadata="$(docker run --sysctl net.mptcp.enabled=0 --rm --pull=never --network none --read-only \
     --cap-drop ALL --security-opt no-new-privileges:true \
     -v "$bundle_dir:/runtime-evidence:ro" \
     --entrypoint node "$parser_image_id" --input-type=module --eval '
@@ -231,7 +231,7 @@ while IFS= read -r complete_file; do
   }
   trap cleanup_bundle EXIT
   trap 'exit 143' TERM INT
-  docker run -d --pull=never --name "$redis_name" \
+  docker run --sysctl net.mptcp.enabled=0 -d --pull=never --name "$redis_name" \
     --network "$network" --network-alias "$redis_name" \
     --memory 512m --cpus 0.5 --pids-limit 128 \
     --tmpfs /data:rw,noexec,nosuid,size=384m \
@@ -252,7 +252,7 @@ while IFS= read -r complete_file; do
 
   set +e
   attempted=$((attempted + 1))
-  timeout --signal=TERM --kill-after=30s 2h docker run --rm --pull=never \
+  timeout --signal=TERM --kill-after=30s 2h docker run --sysctl net.mptcp.enabled=0 --rm --pull=never \
     --name "$replay_name" --user 1000:1000 --network "$network" \
     --read-only --tmpfs /tmp:rw,noexec,nosuid,size=256m \
     --memory "$replay_memory" --memory-swap "$replay_memory" \

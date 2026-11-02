@@ -38,7 +38,7 @@ for deployment in "${deployments[@]}"; do
   docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment "$deployment" > "$work/verify.json" || { record_attempt failed; status=1; continue; }
   # A recreated app must not inherit the previous container's observation.
   [[ "$(docker inspect --format '{{.Image}}:{{.State.StartedAt}}' app)" = "$image_id:$(sed -n 's/.*"startedAt":"\([^"]*\)".*/\1/p' "$work/container.json")" ]] || exit 1
-  docker run --rm --entrypoint node -v "$PWD:/deploy" "$image_id" /deploy/scripts/write-runtime-verification.mjs /deploy/data/runtime-verification "/deploy/$work/manifest.json" "/deploy/$work/verify.json" "/deploy/$work/container.json" "$mode" || { record_attempt failed; status=1; continue; }
+  docker run --sysctl net.mptcp.enabled=0 --rm --entrypoint node -v "$PWD:/deploy" "$image_id" /deploy/scripts/write-runtime-verification.mjs /deploy/data/runtime-verification "/deploy/$work/manifest.json" "/deploy/$work/verify.json" "/deploy/$work/container.json" "$mode" || { record_attempt failed; status=1; continue; }
   record_attempt succeeded
 done
 exit "$status"

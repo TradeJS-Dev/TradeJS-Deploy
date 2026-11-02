@@ -9,6 +9,11 @@ timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_path="$backup_root/dump-$timestamp.rdb"
 persistent_count_script="local cursor='0'; local count=0; repeat local result=redis.call('SCAN', cursor, 'COUNT', 1000); cursor=result[1]; for _, key in ipairs(result[2]) do if redis.call('PTTL', key) == -1 then count=count+1 end end until cursor == '0'; return count"
 verify=false
+mptcp_sysctls=()
+# Docker Desktop has no MPTCP sysctl; production runs on the Linux Docker host.
+if [ -e /proc/sys/net/mptcp/enabled ]; then
+  mptcp_sysctls=(--sysctl net.mptcp.enabled=0)
+fi
 
 for argument in "$@"; do
   case "$argument" in
@@ -80,7 +85,7 @@ fi
 docker cp "$redis_container:$source_dir/$source_dbfilename" "$backup_path.tmp"
 mv "$backup_path.tmp" "$backup_path"
 sha256sum "$backup_path" > "$backup_path.sha256"
-docker run --rm --user 0 --entrypoint redis-check-rdb \
+docker run ${mptcp_sysctls[@]+"${mptcp_sysctls[@]}"} --rm --user 0 --entrypoint redis-check-rdb \
   -v "$backup_root:/backup:ro" \
   "$redis_image" "/backup/$(basename "$backup_path")" >/dev/null
 
@@ -90,7 +95,7 @@ if [ "$verify" = true ]; then
     docker rm -f "$drill_name" >/dev/null 2>&1 || true
   }
   trap cleanup EXIT
-  docker run -d --name "$drill_name" --user 0 \
+  docker run ${mptcp_sysctls[@]+"${mptcp_sysctls[@]}"} -d --name "$drill_name" --user 0 \
     -v "$backup_path:/data/dump.rdb:ro" "$redis_image" \
     redis-stack-server --dir /data --dbfilename dump.rdb \
     --appendonly no >/dev/null

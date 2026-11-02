@@ -153,6 +153,7 @@ jobs:
             RELEASE_STATE_FILE=release.env ./scripts/release-state.sh update app "$DEPLOY_PROJECT_SHA" "$DEPLOY_PROJECT_SHA" || rollback_app
 
             ./scripts/redis-backup.sh --verify || rollback_app
+            python3 ./scripts/configure-mptcp.py || rollback_app
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml pull app || rollback_app
             ./scripts/set-runtime-image-digest.sh .env "ghcr.io/tradejs-dev/tradejs-project-app:$DEPLOY_PROJECT_SHA" >/dev/null || rollback_app
 
@@ -170,7 +171,7 @@ jobs:
             docker cp "$incoming_container:/app/runtime-package-manifest.json" "$incoming_manifest" ||
               rollback_app
             docker rm "$incoming_container" >/dev/null
-            docker run --rm --entrypoint node -v "$HOME:/deploy" "ghcr.io/tradejs-dev/tradejs-project-app:$DEPLOY_PROJECT_SHA" /deploy/scripts/compare-runtime-manifests.mjs "/deploy/$previous_manifest" "/deploy/$incoming_manifest" "/deploy/$manifest_diff" ||
+            docker run --sysctl net.mptcp.enabled=0 --rm --entrypoint node -v "$HOME:/deploy" "ghcr.io/tradejs-dev/tradejs-project-app:$DEPLOY_PROJECT_SHA" /deploy/scripts/compare-runtime-manifests.mjs "/deploy/$previous_manifest" "/deploy/$incoming_manifest" "/deploy/$manifest_diff" ||
               rollback_app
 
             escaped_pg_password="$(printf '%s' "$DEPLOY_PG_PASSWORD" | sed "s/'/''/g")"

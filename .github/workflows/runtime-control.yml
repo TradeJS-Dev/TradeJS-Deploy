@@ -123,7 +123,7 @@ jobs:
                   docker rm -f "$audit_name" >/dev/null 2>&1 || true
                 }
                 trap cleanup_audit EXIT
-                docker run -d --name "$audit_name" --user 0 \
+                docker run --sysctl net.mptcp.enabled=0 -d --name "$audit_name" --user 0 \
                   -v "$backup:/data/dump.rdb:ro" \
                   redis/redis-stack:7.4.0-v8 \
                   redis-stack-server --dir /data --dbfilename dump.rdb \
