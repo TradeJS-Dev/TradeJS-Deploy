@@ -271,7 +271,7 @@ services:
   certbot:
     sysctls:
       net.mptcp.enabled: "0"
-    image: ghcr.io/tradejs-dev/tradejs-certbot@sha256:f48fa39194d8cff776269ee42051f5c04f2b16fb1597f51dc8a909f1421a00a1
+    image: ghcr.io/tradejs-dev/tradejs-certbot@sha256:c43bc1a7e5bdb82aee24a6646ccbc22578eb80a7b0cefc3db5fcca237eee9205
     container_name: certbot
     mem_limit: ${CERTBOT_MEMORY_LIMIT:-256m}
     volumes:
@@ -288,7 +288,7 @@ services:
   certbot-cron:
     sysctls:
       net.mptcp.enabled: "0"
-    image: ghcr.io/tradejs-dev/tradejs-certbot@sha256:f48fa39194d8cff776269ee42051f5c04f2b16fb1597f51dc8a909f1421a00a1
+    image: ghcr.io/tradejs-dev/tradejs-certbot@sha256:c43bc1a7e5bdb82aee24a6646ccbc22578eb80a7b0cefc3db5fcca237eee9205
     container_name: certbot-cron
     restart: on-failure
     mem_limit: ${CERTBOT_MEMORY_LIMIT:-256m}
