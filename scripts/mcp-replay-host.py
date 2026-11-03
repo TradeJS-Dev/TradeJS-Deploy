@@ -45,15 +45,21 @@ def validate(request, data, identifier):
 
 def prior_result(queue, request):
     # Preserve terminal outcomes from the previous broker protocol as well.
+    fallback = None
     for result_file in queue.glob('*.result'):
         for suffix in ('.consumed', '.interrupted', '.running', '.request'):
             source = result_file.with_suffix(suffix)
             if source.is_file():
                 previous = json.loads(source.read_text())
                 if all(previous.get(key) == request.get(key) for key in ('deploymentId', 'artifactId', 'payloadSha256')):
-                    return json.loads(result_file.read_text())
+                    result = json.loads(result_file.read_text())
+                    result.setdefault('logRequestId', result_file.stem)
+                    log_id = result['logRequestId']
+                    if re.fullmatch(r'[a-f0-9]{64}', log_id) and (queue / (log_id + '.log')).is_file():
+                        return result
+                    fallback = result
                 break
-    return None
+    return fallback
 
 
 def enqueue_daily(root):
@@ -128,6 +134,8 @@ def run(root):
             pair = queue / ('pair-' + hashlib.sha256(json.dumps(identity).encode()).hexdigest() + '.json')
             previous = json.loads(pair.read_text()) if pair.exists() else prior_result(queue, request)
             if previous is not None:
+                if 'logRequestId' not in previous:
+                    previous = prior_result(queue, request) or previous
                 result = previous
                 atomic(file.with_suffix('.result'), result)
                 claimed.rename(file.with_suffix('.consumed'))
@@ -190,6 +198,7 @@ def run(root):
         finally:
             if executor is not None:
                 executor.close()
+        result.setdefault('logRequestId', identifier)
         atomic(file.with_suffix('.result'), result)
         if pair is not None:
             atomic(pair, result)

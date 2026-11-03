@@ -78,11 +78,15 @@ with tempfile.TemporaryDirectory() as tmp:
  (bundle/'manifest.json').write_text(json.dumps({'artifactId':'test','deploymentId':'production','userName':'root','payload':{'bytes':len(payload),'sha256':sha}}))
  m.enqueue_daily(root);q=data/'mcp-replay-requests';files=list(q.glob('*.request'));assert len(files)==1
  request=json.loads(files[0].read_text());assert request['source']=='cron'
+ files[0].with_suffix('.log').write_text('original replay failure\\n')
  files[0].rename(files[0].with_suffix('.consumed'));files[0].with_suffix('.result').write_text(json.dumps({'exitCode':1,'message':'old preflight failure'}))
  m.enqueue_daily(root);assert len(list(q.glob('*.request')))==0
  # A new MCP id must also return the original failed result, never run shell.
  request['id']='a'*64;file=q/(request['id']+'.request');file.write_text(json.dumps(request));m.run(root)
- assert json.loads(file.with_suffix('.result').read_text())['message']=='old preflight failure'
+ result=json.loads(file.with_suffix('.result').read_text())
+ assert result['message']=='old preflight failure'
+ assert result['logRequestId']==files[0].stem
+ assert (q/(result['logRequestId']+'.log')).read_text()=='original replay failure\\n'
 `], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 });
