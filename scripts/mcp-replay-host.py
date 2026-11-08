@@ -149,7 +149,7 @@ def run(root):
                 continue
             env = dict(os.environ, HOME=str(root), RUNTIME_FEEDBACK_DEPLOYMENT_ID=request['deploymentId'],
                        RUNTIME_EVIDENCE_READY_DIR=str(evidence.parent.parent),
-                       RUNTIME_FEEDBACK_NOTIFY='true' if request.get('source') == 'cron' else 'false', RUNTIME_FEEDBACK_MAX_BUNDLES_PER_RUN='1')
+                       RUNTIME_FEEDBACK_NOTIFY=os.environ.get('RUNTIME_FEEDBACK_NOTIFY', 'true') if request.get('source') == 'cron' else 'false', RUNTIME_FEEDBACK_MAX_BUNDLES_PER_RUN='1')
             # Reserve the same lock used by direct/legacy cron before preflight.
             executor = Path(os.environ.get('RUNTIME_FEEDBACK_LOCK_FILE', root / '.runtime-feedback.lock')).open('a')
             try:

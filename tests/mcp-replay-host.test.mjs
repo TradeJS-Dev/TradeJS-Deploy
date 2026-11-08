@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-test('host consumes once, binds checksum, suppresses notifications and never retries interrupted requests', () => {
+for (const source of ['cron', 'mcp']) test(`host consumes once with disabled notifications for ${source}`, () => {
   const result = spawnSync('python3', ['-c', `
-import importlib.util, tempfile, pathlib, json, hashlib, fcntl
+import importlib.util, tempfile, pathlib, json, hashlib, fcntl, os
+os.environ['RUNTIME_FEEDBACK_NOTIFY']='false'
 spec=importlib.util.spec_from_file_location('runner','scripts/mcp-replay-host.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 with tempfile.TemporaryDirectory() as tmp:
@@ -13,6 +14,7 @@ with tempfile.TemporaryDirectory() as tmp:
  (bundle/'runtime-evidence.json').write_text('{"userName":"root"}');(bundle/'.complete').write_text('test')
  (bundle/'manifest.json').write_text(json.dumps({'artifactId':'test','deploymentId':'production','payload':{'sha256':hashlib.sha256((bundle/'runtime-evidence.json').read_bytes()).hexdigest(),'bytes':(bundle/'runtime-evidence.json').stat().st_size}}))
  request={'schemaVersion':1,'id':'a'*64,'evidence':str((bundle/'runtime-evidence.json').relative_to(data)), 'artifactId':'test','deploymentId':'production','payloadSha256':hashlib.sha256((bundle/'runtime-evidence.json').read_bytes()).hexdigest()}
+ request['source']='${source}'
  scripts=root/'scripts';scripts.mkdir()
  (scripts/'runtime-feedback-replay.sh').write_text('if [ "$1" = --preflight ]; then exit 0; fi\\ntest "$RUNTIME_FEEDBACK_NOTIFY" = false || exit 9\\nmkdir -p "$HOME/data/runtime-feedback/completed/production"\\necho "{}" > "$HOME/data/runtime-feedback/completed/production/test.json"\\necho run >> "$HOME/calls"\\n')
  file=q/(request['id']+'.request');file.write_text(json.dumps(request));m.run(root)
