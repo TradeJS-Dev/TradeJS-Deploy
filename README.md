@@ -46,7 +46,7 @@ from source and it does not depend directly on npm package publishing.
   replay runs with a read-only Timescale role, an isolated Redis instance,
   bounded resources, and no exchange-facing transport; its image lease is
   retained until the feedback artifact is collected.
-- Redis Stack is pinned to `7.4.0-v8`, uses AOF (`everysec`) plus RDB snapshots, and is backed up with a restore drill before deploys and once per day. Backups are retained under `~/backups/redis` for 14 days by default.
+- Redis Stack uses an immutable Deploy image based on `7.4.0-v8` with Redis server and recovery tools at `7.4.12`. It uses AOF (`everysec`) plus RDB snapshots, and is backed up with a restore drill before deploys and once per day. Backups are retained under `~/backups/redis` for 14 days by default.
 - Redis explicitly uses `/data/dump.rdb`, making the named `redisdata` volume the sole persistence location. A deployment is rejected when Redis uses any other persistence path. The persistent-key count must match after Redis is recreated.
 - `TradeJS-Site` and `TradeJS-Docs` publish full-SHA images without server
   credentials. Their production rollout happens only through Deploy's typed
@@ -70,13 +70,15 @@ Insufficient memory or a busy executor leaves a request waiting rather than
 marking it successful. `RUNTIME_FEEDBACK_MIN_AVAILABLE_KB` defaults to
 `7340032` KiB; readiness does not reserve that memory. Repeated requests for an
 already processed evidence/image pair reuse its recorded result, including a
-failure. Old failures are not silently retried.
+failure. The reused result points to the original host log if it is retained.
+Old failures are not silently retried.
 
 Host interruption, cancellation and timeout fail the request without automatic
 retry. Results and host logs remain beside the request. An MCP replay neither
 sends a notification nor adds the artifact to the scheduled notification queue;
 the daily feedback process keeps ownership of its own completion and notification
-markers.
+markers. Set `RUNTIME_FEEDBACK_NOTIFY=false` in the host runner environment to
+disable scheduled feedback delivery while still processing the replay queue.
 
 ## Container network verification
 
