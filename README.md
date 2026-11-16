@@ -52,6 +52,14 @@ from source and it does not depend directly on npm package publishing.
   credentials. Their production rollout happens only through Deploy's typed
   component workflow.
 
+## TLS certificates
+
+Both `certbot` (initial issuance) and `certbot-cron` (renewal) use the same
+immutable `tradejs-certbot` image digest in `docker-compose.prod.yml`. The
+[Certbot image workflow](.github/workflows/publish-certbot.yml) builds the
+image and verifies the CA bundles before pushing it. When updating the
+image, pin the new published digest in both services.
+
 ## MCP replay worker
 
 The optional `mcp` Compose profile runs `mcp-worker` from the exact app image
