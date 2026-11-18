@@ -151,7 +151,7 @@ assert(
     runtimeFeedbackReplay.includes(
       'TRADEJS_EXTERNAL_ORDER_PLACEMENT=false',
     ) &&
-    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-7340032') &&
+    runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-5242880') &&
     runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_REPLAY_MEMORY:-7g') &&
     runtimeFeedbackReplay.includes('RUNTIME_FEEDBACK_NODE_HEAP_MB:-6144') &&
     runtimeFeedbackReplay.includes('--memory "$replay_memory"') &&

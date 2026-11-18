@@ -107,7 +107,7 @@ def run(root):
         return
     def heartbeat():
         available = next((int(line.split()[1]) for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')), None) if Path('/proc/meminfo').exists() else None
-        minimum = int(os.environ.get('RUNTIME_FEEDBACK_MIN_AVAILABLE_KB', '7340032'))
+        minimum = int(os.environ.get('RUNTIME_FEEDBACK_MIN_AVAILABLE_KB', '5242880'))
         atomic(queue / 'heartbeat.json', {'protocolVersion': 2, 'observedAt': int(time.time() * 1000),
                'memoryAvailableKb': available, 'minimumAvailableKb': minimum,
                'readiness': 'unknown' if available is None else 'waiting_resources' if available < minimum else 'ready'})

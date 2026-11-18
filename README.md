@@ -76,9 +76,10 @@ The daily cron publishes requests with `--enqueue-daily`; the minute runner
 executes them under the shared lock. Its heartbeat reports memory readiness.
 Insufficient memory or a busy executor leaves a request waiting rather than
 marking it successful. `RUNTIME_FEEDBACK_MIN_AVAILABLE_KB` defaults to
-`7340032` KiB; readiness does not reserve that memory. Repeated requests for an
-already processed evidence/image pair reuse its recorded result, including a
-failure. The reused result points to the original host log if it is retained.
+`5242880` KiB (5 GiB); readiness does not reserve that memory. The replay
+container limit remains 7 GiB and its Node heap remains 6144 MiB. Repeated
+requests for an already processed evidence/image pair reuse its recorded result,
+including a failure. The reused result points to the original host log if it is retained.
 Old failures are not silently retried.
 
 Host interruption, cancellation and timeout fail the request without automatic

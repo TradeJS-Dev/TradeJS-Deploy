@@ -162,7 +162,7 @@ test('retains unresolved replay failures and rotates bounded runtime feedback lo
   );
 });
 
-test('reserves enough memory for the full-universe replay heap', () => {
+test('uses a 5 GiB admission threshold while preserving replay memory limits', () => {
   const script = fs.readFileSync(
     path.join(root, 'scripts/runtime-feedback-replay.sh'),
     'utf8',
@@ -170,7 +170,7 @@ test('reserves enough memory for the full-universe replay heap', () => {
 
   assert.match(
     script,
-    /RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-7340032/,
+    /RUNTIME_FEEDBACK_MIN_AVAILABLE_KB:-5242880/,
   );
   assert.match(script, /RUNTIME_FEEDBACK_REPLAY_MEMORY:-7g/);
   assert.match(script, /RUNTIME_FEEDBACK_NODE_HEAP_MB:-6144/);
