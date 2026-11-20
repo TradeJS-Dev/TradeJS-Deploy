@@ -159,7 +159,7 @@ services:
     sysctls:
       net.mptcp.enabled: "0"
     container_name: inv-timescale
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.32.1-pg16@sha256:5d7a2f9d9d593315368338aa6054fda37d7707b4a12a912e30dcb7523385e2b4
     mem_limit: ${TIMESCALE_MEMORY_LIMIT:-4g}
     environment:
       - POSTGRES_USER=app
