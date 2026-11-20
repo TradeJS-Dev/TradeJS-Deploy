@@ -92,3 +92,65 @@ with tempfile.TemporaryDirectory() as tmp:
 `], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('broker never truncates shared symlink or hard-link targets and rejects linked parents', () => {
+  const result = spawnSync('python3', ['-c', `
+import importlib.util, tempfile, pathlib, os, json
+spec=importlib.util.spec_from_file_location('runner','scripts/mcp-replay-host.py')
+m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as tmp:
+ root=pathlib.Path(tmp)/'host';root.mkdir();outside=pathlib.Path(tmp)/'outside';outside.mkdir()
+ victim=outside/'keep';victim.write_text('unchanged')
+ q=root/'data/mcp-replay-requests';q.mkdir(parents=True)
+ (q/'.lock').symlink_to(victim)
+ (q/'heartbeat.json.tmp').symlink_to(victim)
+ (q/'heartbeat.json').symlink_to(victim)
+ with m.BrokerFiles(root) as files:
+  files.atomic(q/'heartbeat.json', {'ok':True})
+  assert json.loads((q/'heartbeat.json').read_text())=={'ok':True}
+  log=q/'test.log';os.link(victim, log)
+  with files.output(log) as stream:stream.write('new log')
+  assert log.read_text()=='new log' and victim.read_text()=='unchanged'
+  for name in ['linked.request','linked.result']:
+   file=q/name;file.symlink_to(victim)
+   try:files.read(file)
+   except OSError:pass
+   else:raise AssertionError('followed linked input')
+  (root/'data/linked').symlink_to(outside, target_is_directory=True)
+  for operation in [lambda:files.atomic(root/'data/linked/keep', {}), lambda:files.publish(root/'data/linked/new.request', {})]:
+   try:operation()
+   except OSError:pass
+   else:raise AssertionError('followed directory link')
+  # Renaming the shared parent after it has been opened cannot redirect writes.
+  with files.parent(q/'swap.json') as (fd,name):
+   moved=q.with_name('original');q.rename(moved);q.symlink_to(outside,target_is_directory=True)
+   descriptor=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600,dir_fd=fd)
+   os.write(descriptor,b'ok');os.close(descriptor)
+   assert (moved/'swap.json').read_text()=='ok'
+   assert not (outside/'swap.json').exists()
+ assert victim.read_text()=='unchanged'
+`], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('broker keeps operator lock overrides and waits for an old-release lock', () => {
+  const result = spawnSync('python3', ['-c', `
+import importlib.util,tempfile,pathlib,fcntl
+spec=importlib.util.spec_from_file_location('runner','scripts/mcp-replay-host.py')
+m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as tmp:
+ root=pathlib.Path(tmp)/'host';root.mkdir();queue=root/'data/mcp-replay-requests';queue.mkdir(parents=True)
+ with m.BrokerFiles(root) as files:
+  outside=pathlib.Path(tmp)/'operator.lock';outside.write_text('keep')
+  with files.host_lock(outside) as lock:
+   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+   assert outside.read_text()=='keep'
+ with (queue/'.lock').open('w') as legacy:
+  fcntl.flock(legacy,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  m.run(root)
+  assert not (queue/'heartbeat.json').exists()
+ m.run(root)
+ assert (queue/'heartbeat.json').is_file()
+`], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+});
