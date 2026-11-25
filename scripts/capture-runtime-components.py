@@ -20,7 +20,8 @@ COMPONENTS = {
 }
 SHA = re.compile(r'[a-f0-9]{40}')
 DIGEST = re.compile(r'sha256:[a-f0-9]{64}')
-CONTAINER_FORMAT = '{"containerId":{{json .Id}},"imageId":{{json .Image}},"state":{{json .State.Status}},"running":{{json .State.Running}},"startedAt":{{json .State.StartedAt}},"exitCode":{{json .State.ExitCode}},"restartCount":{{json .RestartCount}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}'
+# Docker omits the Health key for containers without a healthcheck.
+CONTAINER_FORMAT = '{"containerId":{{json .Id}},"imageId":{{json .Image}},"state":{{json .State.Status}},"running":{{json .State.Running}},"startedAt":{{json .State.StartedAt}},"exitCode":{{json .State.ExitCode}},"restartCount":{{json .RestartCount}},"health":{{with index .State "Health"}}{{json .Status}}{{else}}null{{end}}}'
 IMAGE_FORMAT = '{"id":{{json .Id}},"repoDigests":{{json .RepoDigests}}}'
 
 

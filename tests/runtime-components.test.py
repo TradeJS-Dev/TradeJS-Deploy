@@ -1,11 +1,16 @@
 import base64
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+import uuid
 
 spec = importlib.util.spec_from_file_location('components', Path(__file__).resolve().parents[1] / 'scripts/capture-runtime-components.py')
 module = importlib.util.module_from_spec(spec)
@@ -119,6 +124,36 @@ class ComponentsTest(unittest.TestCase):
                 module.declarations(bad, compose)
         with self.assertRaises(ValueError):
             module.declarations(release, b'services:\n  certbot:\n    image: certbot:latest\n')
+
+
+class DockerObservationTest(unittest.TestCase):
+    def test_inspects_container_without_healthcheck(self):
+        if not shutil.which('docker') or subprocess.run(
+            ['docker', 'info'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+        ).returncode:
+            self.skipTest('Docker is unavailable')
+
+        name = 'tradejs-component-test-' + uuid.uuid4().hex
+        empty_filesystem = io.BytesIO()
+        with tarfile.open(fileobj=empty_filesystem, mode='w'):
+            pass
+        image = subprocess.check_output(
+            ['docker', 'import', '--change', 'LABEL tradejs.component-test=' + name, '-'],
+            input=empty_filesystem.getvalue(), timeout=30,
+        ).decode().strip()
+        self.addCleanup(subprocess.run, ['docker', 'image', 'rm', image], check=True, capture_output=True, timeout=30)
+        subprocess.run(
+            ['docker', 'create', '--name', name, '--no-healthcheck', image, '/unused'],
+            check=True, capture_output=True, timeout=15,
+        )
+        self.addCleanup(subprocess.run, ['docker', 'container', 'rm', name], check=True, capture_output=True, timeout=15)
+
+        with patch.object(module, 'COMPONENTS', {name: None}):
+            observed = module.containers()[name]
+
+        self.assertEqual(observed['imageId'], image)
+        self.assertEqual(observed['state'], 'created')
+        self.assertIsNone(observed['health'])
 
 
 if __name__ == '__main__':
