@@ -58,7 +58,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.prod.yml,scripts/release-state.sh,scripts/verify-mptcp-disabled.sh,scripts/configure-mptcp.py"
+          source: "docker-compose.prod.yml,scripts/release-state.sh,scripts/verify-mptcp-disabled.sh,scripts/configure-mptcp.py,scripts/capture-runtime-components.py,scripts/install-runtime-components-cron.sh"
           target: ~/
 
       - name: Copy Nginx config for web component rollout
@@ -74,6 +74,7 @@ jobs:
       - name: Deploy exact component image
         uses: appleboy/ssh-action@v1.0.3
         env:
+          DEPLOY_SOURCE_SHA: ${{ github.sha }}
           DEPLOY_COMPONENT: ${{ inputs.component }}
           DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
         with:
@@ -81,10 +82,11 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 20m
-          envs: DEPLOY_COMPONENT,DEPLOY_IMAGE_SHA
+          envs: DEPLOY_COMPONENT,DEPLOY_IMAGE_SHA,DEPLOY_SOURCE_SHA
           script: |
             set -Eeuo pipefail
             cd ~/
+            bash ./scripts/install-runtime-components-cron.sh "$DEPLOY_SOURCE_SHA"
             chmod +x ./scripts/release-state.sh
             RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
 
@@ -113,6 +115,7 @@ jobs:
               if [ "$DEPLOY_COMPONENT" = site ] || [ "$DEPLOY_COMPONENT" = docs ]; then
                 docker restart nginx >/dev/null 2>&1 || true
               fi
+              python3 ./scripts/capture-runtime-components.py || true
               exit 1
             }
 
@@ -144,3 +147,4 @@ jobs:
             RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
             bash ./scripts/verify-mptcp-disabled.sh --env-file .env --env-file release.env -f docker-compose.prod.yml || rollback_component
             docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml ps "$DEPLOY_COMPONENT"
+            python3 ./scripts/capture-runtime-components.py

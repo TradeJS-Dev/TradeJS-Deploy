@@ -133,6 +133,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           DEPLOY_AGENT_SHA: ${{ inputs.agent_sha }}
+          DEPLOY_SOURCE_SHA: ${{ github.sha }}
           DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
           DEPLOY_REPLAY_PG_PASSWORD: ${{ secrets.REPLAY_PG_PASSWORD }}
         with:
@@ -140,12 +141,13 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 40m
-          envs: DEPLOY_AGENT_SHA,DEPLOY_PG_PASSWORD,DEPLOY_REPLAY_PG_PASSWORD
+          envs: DEPLOY_AGENT_SHA,DEPLOY_PG_PASSWORD,DEPLOY_REPLAY_PG_PASSWORD,DEPLOY_SOURCE_SHA
           script: |
             set -Eeuo pipefail
             cd ~/
             mkdir -p data screenshots certbot/conf certbot/www tradejs-agent-repo agent-ssh releases scripts
             chmod +x ./init-cert.sh ./ensure-swap.sh ./scripts/*.sh
+            ./scripts/install-runtime-components-cron.sh "$DEPLOY_SOURCE_SHA"
             RELEASE_STATE_FILE=release.env.incoming ./scripts/release-state.sh validate
             ./ensure-swap.sh
 
@@ -232,6 +234,7 @@ jobs:
             docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production
             ./scripts/capture-runtime-verification.sh deploy
             ./scripts/install-runtime-verification-cron.sh
+            python3 ./scripts/capture-runtime-components.py
             ./scripts/mcp-worker-control.sh reconcile
             ./scripts/install-runtime-feedback-cron.sh
             bash ./scripts/verify-mptcp-disabled.sh --env-file .env --env-file release.env -f docker-compose.prod.yml

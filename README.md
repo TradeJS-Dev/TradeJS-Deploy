@@ -40,6 +40,27 @@ from source and it does not depend directly on npm package publishing.
   without a deploy receipt keep that timestamp unknown. MCP exposes the report
   through read-only `runtime_get_verification`; `fresh=false` or a failed capture
   is insufficient for promotion. The collector owns Docker access; MCP does not.
+- Component images have a separate Deploy-owned snapshot under
+  `data/runtime-components/root/`. It records the declared release image,
+  observed container/image IDs and repository digest for app, agent, ml-infer,
+  site, docs, certbot and certbot-cron. `deploySourceSha` identifies the scripts
+  and Compose declaration; Certbot uses its Compose-pinned digest and does not
+  invent a component Git SHA. An exited Certbot with exit code 0 is expected;
+  certbot-cron must stay running.
+- `capture-runtime-components.py` collects after app/component rollouts,
+  initialization and rollbacks, plus once daily at 10:30 Europe/Moscow before
+  the daily audit. `install-runtime-components-cron.sh <Deploy SHA>` installs
+  the daily schedule without changing Project's five-minute verification.
+  The snapshot checks container identity and release files before and after
+  collection, seals the payload with SHA-256 and atomically replaces the last
+  success. A failed attempt remains visible separately.
+- The installation owner's read-only `runtime_get_components` MCP tool requires
+  `runtime:read` and an accessible deployment. It checks the snapshot against
+  the running Project manifest and image digest, reports missing or mismatched
+  components, and returns `fresh=false` after 25 hours or an unfinished/failed
+  collection. A running container without a healthcheck is not labelled healthy.
+  MCP reads prepared files and has no Docker socket, SSH access or collection
+  command. Component collection never changes Project's `deploymentVerifiedAt`.
 - Deployment ensures a persistent 4 GB `/swapfile`, caps the main service containers through Compose memory limits, and keeps runtime signals for three days by default.
 - After the daily runtime-evidence window closes, the server replays that
   window with the exact image digest recorded by the evidence bundle. The

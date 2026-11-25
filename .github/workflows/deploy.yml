@@ -116,6 +116,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           DEPLOY_PROJECT_SHA: ${{ steps.release.outputs.project_sha }}
+          DEPLOY_SOURCE_SHA: ${{ github.sha }}
           DEPLOY_PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
           DEPLOY_REPLAY_PG_PASSWORD: ${{ secrets.REPLAY_PG_PASSWORD }}
         with:
@@ -123,11 +124,12 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 30m
-          envs: DEPLOY_PROJECT_SHA,DEPLOY_PG_PASSWORD,DEPLOY_REPLAY_PG_PASSWORD
+          envs: DEPLOY_PROJECT_SHA,DEPLOY_PG_PASSWORD,DEPLOY_REPLAY_PG_PASSWORD,DEPLOY_SOURCE_SHA
           script: |
             set -Eeuo pipefail
             cd ~/
             chmod +x ./scripts/*.sh
+            ./scripts/install-runtime-components-cron.sh "$DEPLOY_SOURCE_SHA"
 
             RELEASE_STATE_FILE=release.env ./scripts/release-state.sh validate
             for container in inv-redis inv-timescale ml-infer nginx; do
@@ -222,6 +224,7 @@ jobs:
             docker exec app ./node_modules/.bin/tradejs runtime-control verify --user root --deployment production || rollback_app
             ./scripts/capture-runtime-verification.sh deploy || rollback_app
             ./scripts/install-runtime-verification-cron.sh || rollback_app
+            python3 ./scripts/capture-runtime-components.py
             ./scripts/mcp-worker-control.sh reconcile || rollback_app
             ./scripts/install-runtime-feedback-cron.sh || rollback_app
             bash ./scripts/verify-mptcp-disabled.sh --env-file .env --env-file release.env -f docker-compose.prod.yml || rollback_app

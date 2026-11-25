@@ -28,3 +28,8 @@ APP_IMAGE_TAG="$rollback_app_image_tag" docker compose \
 if [ -x ./scripts/mcp-worker-control.sh ]; then
   APP_IMAGE_TAG="$rollback_app_image_tag" ./scripts/mcp-worker-control.sh reconcile
 fi
+
+# Refresh component evidence after restoring the previous app identity.
+if [ -f ./scripts/capture-runtime-components.py ]; then
+  python3 ./scripts/capture-runtime-components.py
+fi
