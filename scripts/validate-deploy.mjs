@@ -22,6 +22,7 @@ const runtimeFeedbackCron = read('scripts/install-runtime-feedback-cron.sh');
 const runtimeFeedbackMaintenance = read(
   'scripts/runtime-feedback-maintenance.sh',
 );
+const feedbackFiles = read('scripts/feedback-files.py');
 const runtimeImageDigest = read('scripts/set-runtime-image-digest.sh');
 const dockerImagePrune = read('scripts/docker-image-prune.sh');
 const dockerImageMaintenance = read('scripts/docker-image-maintenance.py');
@@ -172,9 +173,11 @@ assert(
   runtimeFeedbackMaintenance.includes('RUNTIME_FEEDBACK_FAILED_RETENTION_DAYS:-30') &&
     runtimeFeedbackMaintenance.includes('RUNTIME_FEEDBACK_LOG_RETENTION_DAYS:-30') &&
     runtimeFeedbackMaintenance.includes('RUNTIME_FEEDBACK_LOG_MAX_BYTES:-10485760') &&
-    runtimeFeedbackMaintenance.includes('completed_root/$artifact_id.json') &&
-    runtimeFeedbackMaintenance.includes('rm -rf -- "$failed_dir"') &&
-    runtimeFeedbackMaintenance.includes('mv "$log_path" "$rotated_log"'),
+    runtimeFeedbackMaintenance.includes('feedback-files.py" maintenance') &&
+    feedbackFiles.includes("files.read(completed / (match[1] + '.json')") &&
+    feedbackFiles.includes('remove_tree(files, failed / name)') &&
+    feedbackFiles.includes('info.st_size >= log_max') &&
+    feedbackFiles.includes('src_dir_fd=fd, dst_dir_fd=fd'),
   'Runtime feedback maintenance must retain unresolved failures and bound cron logs',
 );
 assert(

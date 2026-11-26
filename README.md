@@ -244,3 +244,34 @@ signals, evaluations, and trades. The backup is the recovery path.
   `.env` atomically while retaining `.env.previous` for rollback.
 
 Keywords: ai, claude, codex.
+
+
+## Host collector filesystem boundary
+
+Collectors keep locks, logs, temporary files, Deploy source identity and authoritative
+verification receipts in `.tradejs-collector-state` (owner-only0700), outside the
+application's writable `data` mount. App-visible receipt paths and JSON schemas
+remain unchanged. Shared paths are opened through directory descriptors without
+following links. The app-controlled manifest is read as a bounded regular tar member,
+not extracted onto the host.
+
+The first updated `deploy` collection starts a new verified deployment timestamp.
+Legacy app-writable receipts are not imported as authoritative host state. A first
+`observe` without a private deploy receipt reports a missing verification timestamp;
+it does not invent soak history. Subsequent observations preserve the private receipt.
+Changing one shared deployment directory cannot prevent observations for other targets.
+
+Feedback filesystem preparation and cleanup use the same descriptor boundary.
+Docker receives only private snapshots and per-run private staging, while the existing
+image, read-only database, isolated Redis, resource limits and notification policy
+remain unchanged. Failed feedback remains published under the existing shared paths.
+Cron output is private; remove an old `RUNTIME_FEEDBACK_LOG_PATH` override before
+installing the updated cron entries. No script performs a production migration or
+replay merely by being committed. Deploy/initialize deliver the complete scripts
+bundle; the component workflow explicitly delivers its helper dependencies.
+
+A rollout must install the scripts as one reviewed source unit, rerun the idempotent
+cron installers, and check private directory ownership, loaded script hashes, fresh
+receipts and all service healthchecks. An application-image rollback keeps these
+Deploy-owned scripts and private state; restoring an older Deploy scripts bundle
+would reopen the boundary and is not a supported security rollback.

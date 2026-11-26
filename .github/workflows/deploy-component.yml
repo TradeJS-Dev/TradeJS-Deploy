@@ -58,7 +58,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.prod.yml,scripts/release-state.sh,scripts/verify-mptcp-disabled.sh,scripts/configure-mptcp.py,scripts/capture-runtime-components.py,scripts/install-runtime-components-cron.sh"
+          source: "docker-compose.prod.yml,scripts/release-state.sh,scripts/verify-mptcp-disabled.sh,scripts/configure-mptcp.py,scripts/capture-runtime-components.py,scripts/install-runtime-components-cron.sh,scripts/host_files.py,scripts/collector-state.py"
           target: ~/
 
       - name: Copy Nginx config for web component rollout

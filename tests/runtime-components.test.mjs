@@ -28,4 +28,6 @@ test('daily cron is idempotent and preserves the five-minute Project collector',
   assert.equal(installed.split('capture-runtime-components.py').length - 1, 1);
   assert.match(installed, /\*\/5 \* \* \* \* project-verification/);
   assert.equal(fs.readFileSync(path.join(directory, 'data/runtime-components/deploy-source-sha'), 'utf8').trim(), 'a'.repeat(40));
+  assert.match(installed, /\.tradejs-collector-state\/components\.log/);
+  assert.doesNotMatch(installed, /data\/runtime-components\/collector\.log/);
 });

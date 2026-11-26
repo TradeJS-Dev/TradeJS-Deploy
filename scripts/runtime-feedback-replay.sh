@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
+readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+files() { python3 "$script_dir/feedback-files.py" "$@"; }
 
 readonly deployment_id="${RUNTIME_FEEDBACK_DEPLOYMENT_ID:-production}"
 readonly evidence_root="${RUNTIME_EVIDENCE_READY_DIR:-$HOME/data/runtime-evidence/ready/$deployment_id}"
@@ -57,7 +59,7 @@ if [ ! -f "$feedback_env_file" ]; then
   exit 1
 fi
 
-mkdir -p "$feedback_root/incoming" "$feedback_root/ready/$deployment_id" \
+files init "$feedback_root/incoming" "$feedback_root/ready/$deployment_id" \
   "$feedback_root/failed" "$feedback_root/completed/$deployment_id" \
   "$feedback_root/notify-pending/$deployment_id" \
   "$feedback_root/notified/$deployment_id" "$feedback_root/work"
@@ -101,7 +103,7 @@ notify_ready_bundle() {
   local notification_status
 
   if [ -f "$notification_file" ]; then
-    rm -f "$pending_file"
+    files remove "$pending_file"
     return 0
   fi
   case "$ready_bundle" in
@@ -125,9 +127,8 @@ notify_ready_bundle() {
 
   notification_tmp="${notification_file}.tmp-$$"
   printf '{"schemaVersion":1,"runtimeEvidenceArtifactId":"%s","runtimeFeedbackBundle":"%s","notifiedAt":%s}\n' \
-    "$artifact_id" "$ready_bundle" "$(date +%s000)" > "$notification_tmp"
-  mv "$notification_tmp" "$notification_file"
-  rm -f "$pending_file"
+    "$artifact_id" "$ready_bundle" "$(date +%s000)" | files write "$notification_file"
+  files remove "$pending_file"
   echo "Runtime feedback notification sent: $ready_bundle"
 }
 
@@ -157,7 +158,7 @@ while IFS= read -r complete_file; do
   if [ "$rerun" != true ] && [ -f "$completion_file" ]; then
     pending_file="$feedback_root/notify-pending/$deployment_id/$artifact_hint"
     if [ -f "$pending_file" ]; then
-      IFS= read -r ready_dir < "$pending_file"
+      ready_dir="$(files read "$pending_file")"
       if ! notify_ready_bundle "$artifact_hint" "$ready_dir"; then
         notification_failed=$((notification_failed + 1))
       fi
@@ -170,6 +171,9 @@ while IFS= read -r complete_file; do
     echo "Skipping incomplete evidence bundle: $bundle_dir" >&2
     continue
   fi
+  # Only pinned host-private snapshots are ever passed to Docker as bind sources.
+  bundle_dir="$(files snapshot "$bundle_dir")"
+  trap 'files remove "$(dirname "$bundle_dir")"' EXIT
   parser_image_id="$(docker inspect --format '{{.Image}}' app)"
   metadata="$(docker run --sysctl net.mptcp.enabled=0 --rm --pull=never --network none --read-only \
     --cap-drop ALL --security-opt no-new-privileges:true \
@@ -201,6 +205,8 @@ while IFS= read -r complete_file; do
   ' /runtime-evidence/runtime-evidence.json)"
   if [ "$metadata" = legacy ]; then
     echo "Skipping legacy evidence without image identity: $artifact_hint"
+    files remove "$(dirname "$bundle_dir")"
+    trap - EXIT
     continue
   fi
   IFS=$'\t' read -r image_digest project_sha evidence_deployment end_time <<< "$metadata"
@@ -217,17 +223,16 @@ while IFS= read -r complete_file; do
   fi
 
   run_id="$(date -u +%Y%m%dT%H%M%SZ)-${project_sha:0:12}"
-  incoming_dir="$feedback_root/incoming/$artifact_hint/$run_id"
-  work_dir="$feedback_root/work/$artifact_hint-$run_id"
+  prepared_work="$(files prepare)"
+  IFS=$'\t' read -r incoming_dir work_dir <<< "$prepared_work"
   redis_name="runtime-feedback-redis-${artifact_hint:0:24}-${run_id:0:15}"
   replay_name="runtime-feedback-replay-${artifact_hint:0:24}-${run_id:0:15}"
   lease_name="runtime-feedback-image-${artifact_hint:0:40}"
-  mkdir -p "$incoming_dir" "$work_dir"
-  chown 1000:1000 "$incoming_dir" "$work_dir"
 
   cleanup_bundle() {
     docker rm -f "$redis_name" >/dev/null 2>&1 || true
     docker rm -f "$replay_name" >/dev/null 2>&1 || true
+    files remove "$(dirname "$bundle_dir")"
   }
   trap cleanup_bundle EXIT
   trap 'exit 143' TERM INT
@@ -283,8 +288,8 @@ while IFS= read -r complete_file; do
 
   if [ "$replay_status" -ne 0 ] || [ ! -f "$incoming_dir/.complete" ]; then
     failed_dir="$feedback_root/failed/$artifact_hint-$run_id"
-    mv "$incoming_dir" "$failed_dir"
-    rm -rf "$work_dir"
+    files publish "$incoming_dir" "$failed_dir"
+    files remove "$(dirname "$incoming_dir")"
     echo "Runtime feedback replay failed: $artifact_hint (status=$replay_status)" >&2
     failed=$((failed + 1))
     [ "$attempted" -lt "$max_bundles" ] || break
@@ -293,9 +298,8 @@ while IFS= read -r complete_file; do
 
   date_path="$(date -u -d "@$((end_time / 1000))" +%Y/%m/%d)"
   ready_dir="$feedback_root/ready/$deployment_id/$date_path/$artifact_hint/$run_id"
-  mkdir -p "$(dirname "$ready_dir")"
-  mv "$incoming_dir" "$ready_dir"
-  rm -rf "$work_dir"
+  files publish "$incoming_dir" "$ready_dir"
+  files remove "$(dirname "$incoming_dir")"
   docker rm "$lease_name" >/dev/null 2>&1 || true
   expires_at="$(( $(date +%s) + lease_days * 86400 ))"
   docker create --name "$lease_name" --pull=never \
@@ -305,14 +309,12 @@ while IFS= read -r complete_file; do
 
   receipt_tmp="${completion_file}.tmp-$$"
   printf '{"schemaVersion":1,"runtimeEvidenceArtifactId":"%s","runtimeFeedbackBundle":"%s","completedAt":%s}\n' \
-    "$artifact_hint" "$ready_dir" "$(date +%s000)" > "$receipt_tmp"
-  mv "$receipt_tmp" "$completion_file"
+    "$artifact_hint" "$ready_dir" "$(date +%s000)" | files write "$completion_file"
 
   if [ "${RUNTIME_FEEDBACK_NOTIFY:-true}" != false ]; then
     pending_file="$feedback_root/notify-pending/$deployment_id/$artifact_hint"
     pending_tmp="${pending_file}.tmp-$$"
-    printf '%s\n' "$ready_dir" > "$pending_tmp"
-    mv "$pending_tmp" "$pending_file"
+    printf '%s\n' "$ready_dir" | files write "$pending_file"
   fi
 
   echo "Runtime feedback replay ready: $ready_dir"

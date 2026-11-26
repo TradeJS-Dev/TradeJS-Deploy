@@ -190,7 +190,7 @@ test('notifies from a verified ready bundle without exposing Telegram credential
   assert.match(script, /runtime-feedback-notify --bundle/);
   assert.match(script, /notified\/\$deployment_id/);
   assert.ok(
-    script.indexOf('mv "$incoming_dir" "$ready_dir"') <
+    script.indexOf('files publish "$incoming_dir" "$ready_dir"') <
       script.lastIndexOf(
         'notify_ready_bundle "$artifact_hint" "$ready_dir"',
       ),
