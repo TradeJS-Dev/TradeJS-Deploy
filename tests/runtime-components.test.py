@@ -31,6 +31,9 @@ class ComponentsTest(unittest.TestCase):
         self.directory = self.root / 'data/runtime-components'
         self.directory.mkdir(parents=True)
         (self.directory / 'deploy-source-sha').write_text('d' * 40)
+        private = self.root / '.tradejs-collector-state'
+        private.mkdir(mode=0o700)
+        (private / 'deploy-source-sha').write_text('d' * 40)
         self.container = dict(containerId='e' * 64, imageId=self.image_id, state='running', running=True, startedAt='2026-11-25T00:00:00Z', exitCode=0, restartCount=0, health=None)
         self.inventory = {n: self.container.copy() for n in [*module.COMPONENTS, 'certbot', 'certbot-cron']}
         self.mismatch = False

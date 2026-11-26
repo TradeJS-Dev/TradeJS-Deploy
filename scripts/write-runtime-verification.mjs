@@ -24,6 +24,7 @@ export function publishVerification({ root, manifestBytes, verification, contain
     if (hash(bytes) !== pointer.sha256 || bytes.length !== pointer.bytes) throw Error('Corrupt deploy receipt');
     const deployed = JSON.parse(bytes);
     if (deployed.imageDigest !== container.imageDigest) throw Error('Image changed without deploy receipt');
+    if (deployed.userName !== verification.userName || deployed.deploymentId !== result.deploymentId || deployed.projectSha !== manifest.projectSha || deployed.deploymentCompositionId !== composition || deployed.accountId !== accountId || !Number.isSafeInteger(deployed.deploymentVerifiedAt) || deployed.deploymentVerifiedAt < 0) throw Error('Deployment receipt binding mismatch');
     deploymentVerifiedAt = deployed.deploymentVerifiedAt;
   }
   const ok = result.ok === true && container.health === 'healthy' && strategies.every(s => ['active', 'entries_paused'].includes(s.controlState));

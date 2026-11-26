@@ -9,7 +9,10 @@ from pathlib import Path
 import re
 import subprocess
 import time
-import uuid
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from host_files import BrokerFiles
 
 COMPONENTS = {
     'app': ('APP_IMAGE_TAG', 'tradejs-project-app'),
@@ -31,15 +34,6 @@ def docker(*args):
         return subprocess.check_output(['docker', *args], text=True, stderr=subprocess.DEVNULL, timeout=30).strip()
     except (subprocess.SubprocessError, OSError) as error:
         raise RuntimeError('Docker component observation failed') from error
-
-
-def atomic(file, value):
-    temporary = file.with_name('.' + file.name + '.' + uuid.uuid4().hex)
-    try:
-        temporary.write_text(json.dumps(value, separators=(',', ':')) + '\n')
-        temporary.replace(file)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def declarations(release_bytes, compose_bytes):
@@ -94,36 +88,42 @@ def component(name, expected, container):
 
 
 def capture(root):
+    with BrokerFiles(root) as files:
+        private = files.private_directory()
+        with files.lock(private / 'components.lock') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return capture_locked(root, files, private)
+
+
+def capture_locked(root, files, private):
+    atomic = files.atomic
     directory = root / 'data/runtime-components/root'
-    directory.mkdir(parents=True, exist_ok=True)
-    with (directory / '.capture.lock').open('w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        attempt = directory / 'latest-attempt.json'
-        atomic(attempt, dict(observedAt=int(time.time() * 1000), status='running'))
-        try:
-            release = (root / 'release.env').read_bytes()
-            compose = (root / 'docker-compose.prod.yml').read_bytes()
-            deploy_sha = (root / 'data/runtime-components/deploy-source-sha').read_text().strip()
-            if not SHA.fullmatch(deploy_sha):
-                raise ValueError('Invalid Deploy source SHA')
-            project_sha, expected = declarations(release, compose)
-            before = containers()
-            components = [component(name, definition, before[name]) for name, definition in expected.items()]
-            # Reject a rollout crossing this capture rather than seal a mixed snapshot.
-            if release != (root / 'release.env').read_bytes() or compose != (root / 'docker-compose.prod.yml').read_bytes() or before != containers() or deploy_sha != (root / 'data/runtime-components/deploy-source-sha').read_text().strip():
-                raise ValueError('Component state changed during observation')
-            report = dict(schemaVersion=1, reportType='runtime-components', userName='root', projectSha=project_sha, deploySourceSha=deploy_sha, observedAt=int(time.time() * 1000), ok=all(c['ok'] for c in components), components=components)
-            payload = (json.dumps(report, separators=(',', ':')) + '\n').encode()
-            if len(payload) > 48000:
-                raise ValueError('Component snapshot exceeds MCP limit')
-            sha = hashlib.sha256(payload).hexdigest()
-            # A single atomic envelope binds the payload and checksum.
-            atomic(directory / 'latest.json', dict(bytes=len(payload), sha256=sha, data=base64.b64encode(payload).decode()))
-            atomic(attempt, dict(observedAt=report['observedAt'], status='succeeded', sha256=sha))
-            return report
-        except Exception:
-            atomic(attempt, dict(observedAt=int(time.time() * 1000), status='failed'))
-            raise
+    attempt = directory / 'latest-attempt.json'
+    atomic(attempt, dict(observedAt=int(time.time() * 1000), status='running'))
+    try:
+        release = (root / 'release.env').read_bytes()
+        compose = (root / 'docker-compose.prod.yml').read_bytes()
+        deploy_sha = files.read(private / 'deploy-source-sha').decode().strip()
+        if not SHA.fullmatch(deploy_sha):
+            raise ValueError('Invalid Deploy source SHA')
+        project_sha, expected = declarations(release, compose)
+        before = containers()
+        components = [component(name, definition, before[name]) for name, definition in expected.items()]
+        # Reject a rollout crossing this capture rather than seal a mixed snapshot.
+        if release != (root / 'release.env').read_bytes() or compose != (root / 'docker-compose.prod.yml').read_bytes() or before != containers() or deploy_sha != files.read(private / 'deploy-source-sha').decode().strip():
+            raise ValueError('Component state changed during observation')
+        report = dict(schemaVersion=1, reportType='runtime-components', userName='root', projectSha=project_sha, deploySourceSha=deploy_sha, observedAt=int(time.time() * 1000), ok=all(c['ok'] for c in components), components=components)
+        payload = (json.dumps(report, separators=(',', ':')) + '\n').encode()
+        if len(payload) > 48000:
+            raise ValueError('Component snapshot exceeds MCP limit')
+        sha = hashlib.sha256(payload).hexdigest()
+        # A single atomic envelope binds the payload and checksum.
+        atomic(directory / 'latest.json', dict(bytes=len(payload), sha256=sha, data=base64.b64encode(payload).decode()))
+        atomic(attempt, dict(observedAt=report['observedAt'], status='succeeded', sha256=sha))
+        return report
+    except Exception:
+        atomic(attempt, dict(observedAt=int(time.time() * 1000), status='failed'))
+        raise
 
 
 if __name__ == '__main__':
