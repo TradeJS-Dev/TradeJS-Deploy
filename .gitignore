@@ -8,3 +8,6 @@ tradejs-agent-repo
 agent-ssh
 node_modules
 .yarn/install-state.gz
+
+.server-ingress
+.server-ingress.previous

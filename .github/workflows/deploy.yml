@@ -109,7 +109,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "runtime.env.incoming,docker-compose.prod.yml,scripts"
+          source: "runtime.env.incoming,docker-compose.prod.yml,docker-compose.ingress.yml,scripts"
           target: ~/
 
       - name: Deploy exact Project app

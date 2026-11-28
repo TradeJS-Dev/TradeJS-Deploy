@@ -43,10 +43,10 @@ from source and it does not depend directly on npm package publishing.
 - Component images have a separate Deploy-owned snapshot under
   `data/runtime-components/root/`. It records the declared release image,
   observed container/image IDs and repository digest for app, agent, ml-infer,
-  site, docs, certbot and certbot-cron. `deploySourceSha` identifies the scripts
-  and Compose declaration; Certbot uses its Compose-pinned digest and does not
-  invent a component Git SHA. An exited Certbot with exit code 0 is expected;
-  certbot-cron must stay running.
+  site and docs. In standalone mode it also covers Certbot and its renewal
+  container. `deploySourceSha` identifies the scripts and Compose declaration.
+  The Certbot entries use the image digest pinned in Compose. Certbot can exit
+  successfully after issuance, while the renewal container stays running.
 - `capture-runtime-components.py` collects after app/component rollouts,
   initialization and rollbacks, plus once daily at 10:30 Europe/Moscow before
   the daily audit. `install-runtime-components-cron.sh <Deploy SHA>` installs
@@ -275,3 +275,72 @@ cron installers, and check private directory ownership, loaded script hashes, fr
 receipts and all service healthchecks. An application-image rollback keeps these
 Deploy-owned scripts and private state; restoring an older Deploy scripts bundle
 would reopen the boundary and is not a supported security rollback.
+
+## Shared server ingress
+
+The [server-ingress repository](https://github.com/aleksnick/server-ingress)
+provides the public Caddy proxy. Only TradeJS Nginx joins its dedicated
+`tradejs-ingress` network. The `docker-compose.ingress.yml` override removes
+Nginx's host port bindings and uses `nginx/nginx.conf.ingress`. The standalone
+Nginx and Certbot setup remains available as the default and for rollback.
+Keep the app, MCP, WebSocket, RedisInsight, site and docs routes in sync
+between the two Nginx configurations.
+
+### Cutover
+
+1. Release an app image with the MCP component reader that accepts both
+   snapshot versions. Check the current component report on that image before
+   changing the proxy. During the switch, keep TradeJS deploy workflows and
+   manual Compose changes idle.
+2. Use the existing TradeJS Compose directory on the host so that Compose
+   keeps the same project name, containers and volumes. Copy the new override,
+   `nginx/nginx.conf.ingress` and the component collector files from the
+   same Deploy revision. Save its full Git SHA as `DEPLOY_SOURCE_SHA` for the
+   component report. Keep the existing `release.env`, `.env`, Nginx
+   `.htpasswd` and Certbot files. Confirm the existing certificate is valid
+   for rollback and the new shared network and Caddy config are ready. Check
+   that the resolved ingress config leaves `nginx` without published ports.
+3. In the existing TradeJS deployment directory, run the commands below.
+   Stop Certbot renewal, then recreate only Nginx. In the
+   `server-ingress` checkout run `docker compose up -d`. Leave the old
+   certificates on disk.
+4. From outside the host, check the HTTP redirect and HTTPS on all four
+   TradeJS hostnames. Check an authenticated MCP request to `/mcp`, a
+   connection to `/ws/market`, and RedisInsight with and without credentials.
+   After those checks, create the `.server-ingress` marker in the existing
+   TradeJS deployment directory and recapture the component report. The
+   marker keeps future full initializations in ingress mode and switches the
+   report to version 2, which covers the five application components. Ordinary
+   app and web releases continue to use their existing workflows.
+
+```bash
+compose=(docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml)
+"${compose[@]}" -f docker-compose.ingress.yml config --quiet
+"${compose[@]}" stop certbot-cron
+"${compose[@]}" -f docker-compose.ingress.yml up -d --no-deps --force-recreate nginx
+docker exec nginx nginx -t
+```
+
+After the external checks succeed, run this in the TradeJS directory.
+
+```sh
+bash ./scripts/install-runtime-components-cron.sh "${DEPLOY_SOURCE_SHA:?Set the exact Deploy Git SHA}"
+touch .server-ingress
+python3 ./scripts/capture-runtime-components.py
+```
+
+### Rollback
+
+Stop Caddy with `docker compose stop caddy` in the `server-ingress` checkout.
+Then run the commands below in the TradeJS directory. Check the four public
+hostnames and the component report before resuming normal deployments.
+Moving the marker restores standalone mode for future initializations.
+
+```bash
+compose=(docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml)
+if [ -f .server-ingress ]; then mv .server-ingress .server-ingress.previous; fi
+"${compose[@]}" up -d --no-deps --force-recreate nginx
+docker exec nginx nginx -t
+"${compose[@]}" up -d certbot certbot-cron
+python3 ./scripts/capture-runtime-components.py
+```
