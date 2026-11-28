@@ -36,7 +36,7 @@ def docker(*args):
         raise RuntimeError('Docker component observation failed') from error
 
 
-def declarations(release_bytes, compose_bytes, server_ingress=False):
+def declarations(release_bytes):
     values = {}
     for line in release_bytes.decode().splitlines():
         key, separator, value = line.partition('=')
@@ -46,15 +46,6 @@ def declarations(release_bytes, compose_bytes, server_ingress=False):
     if len(values) != 6 or values.get('PROJECT_SHA') != values.get('APP_IMAGE_TAG'):
         raise ValueError('Incomplete component release declaration')
     expected = {name: (f'ghcr.io/tradejs-dev/{repo}:{values[key]}', values[key]) for name, (key, repo) in COMPONENTS.items()}
-    if server_ingress:
-        return values['PROJECT_SHA'], expected
-    # These services use immutable digests declared in Deploy, not release.env.
-    for name in ('certbot', 'certbot-cron'):
-        block = re.search(r'^  ' + name + r':\n(.*?)(?=^  [\w-]+:|\Z)', compose_bytes.decode(), re.M | re.S)
-        image = re.search(r'^    image: (ghcr\.io/tradejs-dev/tradejs-certbot@sha256:[a-f0-9]{64})\s*$', block[1], re.M) if block else None
-        if not image:
-            raise ValueError('Certbot must declare an immutable image digest')
-        expected[name] = (image[1], None)
     return values['PROJECT_SHA'], expected
 
 
@@ -74,19 +65,17 @@ def component(name, expected, container):
     if not DIGEST.fullmatch(container['imageId']):
         raise ValueError('Invalid observed image ID')
     actual = json.loads(docker('image', 'inspect', '--format', IMAGE_FORMAT, container['imageId']))
-    repository = image.split('@')[0].split(':')[0]
+    repository = image.rsplit(':', 1)[0]
     digests = sorted(set(d[len(repository) + 1:] for d in actual.get('repoDigests') or [] if d.startswith(repository + '@')))
     if any(not DIGEST.fullmatch(d) for d in digests):
         raise ValueError('Invalid observed repository digest')
-    digest = image.split('@')[1] if '@' in image and image.split('@')[1] in digests else digests[0] if len(digests) == 1 else None
+    digest = digests[0] if len(digests) == 1 else None
     try:
         desired = json.loads(docker('image', 'inspect', '--format', IMAGE_FORMAT, image))
         matches = actual['id'] == container['imageId'] == desired['id']
     except RuntimeError:
         matches = None
-    if '@' in image and matches is not None:
-        matches = matches is True and digest == image.split('@')[1]
-    acceptable_state = (container['running'] and container['state'] == 'running') or (name == 'certbot' and container['state'] == 'exited' and container['exitCode'] == 0)
+    acceptable_state = container['running'] and container['state'] == 'running'
     result.update({k: container[k] for k in ('containerId', 'imageId', 'state', 'running', 'health', 'startedAt', 'restartCount', 'exitCode')})
     result.update(imageDigest=digest, matchesRelease=matches, ok=bool(matches and digest and acceptable_state and container['health'] in (None, 'healthy')))
     return result
@@ -107,24 +96,19 @@ def capture_locked(root, files, private):
     atomic(attempt, dict(observedAt=int(time.time() * 1000), status='running'))
     try:
         release = (root / 'release.env').read_bytes()
-        compose = (root / 'docker-compose.prod.yml').read_bytes()
         deploy_sha = files.read(private / 'deploy-source-sha').decode().strip()
         if not SHA.fullmatch(deploy_sha):
             raise ValueError('Invalid Deploy source SHA')
-        ingress_marker = root / '.server-ingress'
-        server_ingress = ingress_marker.is_file()
-        project_sha, expected = declarations(release, compose, server_ingress)
+        project_sha, expected = declarations(release)
         before = containers(expected)
         components = [component(name, definition, before[name]) for name, definition in expected.items()]
         # Reject a rollout crossing this capture rather than seal a mixed snapshot.
         if (release != (root / 'release.env').read_bytes()
-                or compose != (root / 'docker-compose.prod.yml').read_bytes()
-                or server_ingress != ingress_marker.is_file()
                 or before != containers(expected)
                 or deploy_sha != files.read(private / 'deploy-source-sha').decode().strip()):
             raise ValueError('Component state changed during observation')
         report = dict(
-            schemaVersion=2 if server_ingress else 1,
+            schemaVersion=2,
             reportType='runtime-components', userName='root',
             projectSha=project_sha, deploySourceSha=deploy_sha,
             observedAt=int(time.time() * 1000),

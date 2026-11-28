@@ -55,7 +55,7 @@ class ComponentsTest(unittest.TestCase):
         self.assertEqual(hashlib.sha256(raw).hexdigest(), envelope['sha256'])
         self.assertEqual(json.loads(raw), report)
         self.assertTrue(report['ok'])
-        self.assertEqual(len(report['components']), 7)
+        self.assertEqual(len(report['components']), 5)
         self.assertEqual(report['deploySourceSha'], 'd' * 40)
         self.assertNotIn('deploymentVerifiedAt', report)
         self.assertNotIn('env', raw.decode())
@@ -70,23 +70,15 @@ class ComponentsTest(unittest.TestCase):
         self.mismatch = True
         self.assertFalse(self.capture()['components'][0]['matchesRelease'])
 
-    def test_one_shot_certbot_may_exit_successfully_but_cron_must_run(self):
-        self.inventory['certbot'].update(state='exited', running=False)
-        self.assertTrue(self.capture()['ok'])
-        self.inventory['certbot']['exitCode'] = 1
-        self.assertFalse(self.capture()['ok'])
-        self.inventory['certbot']['exitCode'] = 0
-        self.inventory['certbot-cron'].update(state='exited', running=False)
-        self.assertFalse(self.capture()['ok'])
-
-    def test_server_ingress_leaves_certificate_services_out_of_the_snapshot(self):
-        (self.root / '.server-ingress').touch()
-        del self.inventory['certbot']
-        del self.inventory['certbot-cron']
-        report = self.capture()
-        self.assertTrue(report['ok'])
-        self.assertEqual(report['schemaVersion'], 2)
-        self.assertEqual([c['name'] for c in report['components']], list(module.COMPONENTS))
+    def test_report_includes_only_release_components_in_every_proxy_mode(self):
+        for ingress_enabled in (False, True):
+            with self.subTest(ingress_enabled=ingress_enabled):
+                if ingress_enabled:
+                    (self.root / '.server-ingress').touch()
+                report = self.capture()
+                self.assertTrue(report['ok'])
+                self.assertEqual(report['schemaVersion'], 2)
+                self.assertEqual([c['name'] for c in report['components']], list(module.COMPONENTS))
 
     def test_unknown_digest_or_unhealthy_container_are_explicit(self):
         with patch.object(module, 'docker', return_value=json.dumps(dict(id=self.image_id, repoDigests=[]))):
@@ -102,7 +94,7 @@ class ComponentsTest(unittest.TestCase):
                 raise RuntimeError('expected image unavailable')
             return self.docker(*args)
         with patch.object(module, 'docker', side_effect=observe):
-            value = module.component('certbot', ('ghcr.io/tradejs-dev/tradejs-certbot@' + self.digest, None), self.container)
+            value = module.component('agent', ('ghcr.io/tradejs-dev/tradejs-agent:' + self.sha, self.sha), self.container)
         self.assertIsNone(value['matchesRelease'])
         self.assertFalse(value['ok'])
 
@@ -128,14 +120,11 @@ class ComponentsTest(unittest.TestCase):
                 module.capture(self.root)
         self.assertFalse((self.directory / 'root/latest.json').exists())
 
-    def test_declaration_rejects_duplicates_missing_keys_or_mutable_certbot(self):
+    def test_declaration_rejects_duplicates_missing_keys_and_mutable_tags(self):
         release = (self.root / 'release.env').read_bytes()
-        compose = (self.root / 'docker-compose.prod.yml').read_bytes()
         for bad in [release + f'PROJECT_SHA={self.sha}\n'.encode(), b'PROJECT_SHA=latest\n']:
             with self.assertRaises(ValueError):
-                module.declarations(bad, compose)
-        with self.assertRaises(ValueError):
-            module.declarations(release, b'services:\n  certbot:\n    image: certbot:latest\n')
+                module.declarations(bad)
 
 
 class DockerObservationTest(unittest.TestCase):

@@ -185,8 +185,6 @@ services:
     container_name: inv-redis
     restart: unless-stopped
     mem_limit: ${REDIS_MEMORY_LIMIT:-4g}
-    expose:
-      - "8001"
     volumes:
       - redisdata:/data
     command:
@@ -212,6 +210,34 @@ services:
       retries: 10
     networks:
       - web
+
+  redisinsight:
+    sysctls:
+      net.mptcp.enabled: "0"
+    image: redis/redisinsight:3.10.0@sha256:f00fdc1de63baad22ad2c3eeceede2bcf8859db0b45657033ea70e354f6b9173
+    restart: unless-stopped
+    mem_limit: ${REDISINSIGHT_MEMORY_LIMIT:-512m}
+    environment:
+      RI_REDIS_HOST: redis
+      RI_REDIS_ALIAS: TradeJS
+    volumes:
+      - redisinsight-data:/data
+    networks:
+      - web
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5540/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
 
   ml-infer:
     sysctls:
@@ -317,3 +343,4 @@ networks:
 volumes:
   pgdata:
   redisdata:
+  redisinsight-data:

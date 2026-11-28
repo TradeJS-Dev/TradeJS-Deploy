@@ -122,7 +122,8 @@ http {
             auth_basic "Restricted";
             auth_basic_user_file /etc/nginx/tradejs/.htpasswd;
 
-            proxy_pass http://redis:8001;
+            set $redisinsight_upstream redisinsight:5540;
+            proxy_pass http://$redisinsight_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $remote_addr;

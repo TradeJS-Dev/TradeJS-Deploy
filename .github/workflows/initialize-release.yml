@@ -146,7 +146,7 @@ jobs:
             set -Eeuo pipefail
             cd ~/
             compose_args=(--env-file .env --env-file release.env -f docker-compose.prod.yml)
-            infrastructure=(timescale redis ml-infer site docs)
+            infrastructure=(timescale redis redisinsight ml-infer site docs)
             if [ -f .server-ingress ]; then
               docker network inspect tradejs-ingress >/dev/null
               compose_args+=(-f docker-compose.ingress.yml)

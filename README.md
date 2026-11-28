@@ -43,10 +43,9 @@ from source and it does not depend directly on npm package publishing.
 - Component images have a separate Deploy-owned snapshot under
   `data/runtime-components/root/`. It records the declared release image,
   observed container/image IDs and repository digest for app, agent, ml-infer,
-  site and docs. In standalone mode it also covers Certbot and its renewal
-  container. `deploySourceSha` identifies the scripts and Compose declaration.
-  The Certbot entries use the image digest pinned in Compose. Certbot can exit
-  successfully after issuance, while the renewal container stays running.
+  site and docs. The report uses version 2 with either proxy setup. Deploy
+  owns the list of application components through its release declaration.
+  `deploySourceSha` identifies the Deploy revision that produced the report.
 - `capture-runtime-components.py` collects after app/component rollouts,
   initialization and rollbacks, plus once daily at 10:30 Europe/Moscow before
   the daily audit. `install-runtime-components-cron.sh <Deploy SHA>` installs
@@ -72,6 +71,26 @@ from source and it does not depend directly on npm package publishing.
 - `TradeJS-Site` and `TradeJS-Docs` publish full-SHA images without server
   credentials. Their production rollout happens only through Deploy's typed
   component workflow.
+
+## Redis Insight
+
+Redis Insight runs as the `redisinsight` service on the internal Docker
+network. Both Nginx configurations route `redisinsight.tradejs.dev` to port
+5540 on that service and require HTTP Basic authentication. The service keeps
+its settings in the `redisinsight-data` volume and connects to the existing
+Redis service over Docker DNS.
+
+On an existing host, use the current deployment directory and the complete
+Deploy revision. Start the new service alone and wait for its health check
+before updating Nginx.
+
+```bash
+compose=(docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml)
+if [ -f .server-ingress ]; then compose+=(-f docker-compose.ingress.yml); fi
+"${compose[@]}" up -d --no-deps --wait redisinsight
+"${compose[@]}" up -d --no-deps --force-recreate nginx
+docker exec nginx nginx -t
+```
 
 ## TLS certificates
 
@@ -309,9 +328,8 @@ between the two Nginx configurations.
    connection to `/ws/market`, and RedisInsight with and without credentials.
    After those checks, create the `.server-ingress` marker in the existing
    TradeJS deployment directory and recapture the component report. The
-   marker keeps future full initializations in ingress mode and switches the
-   report to version 2, which covers the five application components. Ordinary
-   app and web releases continue to use their existing workflows.
+   marker keeps future full initializations in ingress mode. The component
+   report has the same format with either proxy.
 
 ```bash
 compose=(docker compose --env-file .env --env-file release.env -f docker-compose.prod.yml)
