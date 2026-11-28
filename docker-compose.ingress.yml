@@ -1,0 +1,25 @@
+services:
+  nginx:
+    ports: !reset []
+    volumes: !override
+      - ./nginx:/etc/nginx/tradejs:ro
+    entrypoint: >
+      sh -ec 'ln -sf /etc/nginx/tradejs/nginx.conf.ingress /etc/nginx/nginx.conf;
+      exec nginx -g "daemon off;"'
+    networks:
+      web: {}
+      ingress:
+        aliases:
+          - tradejs-web
+        ipv4_address: 172.30.241.3
+
+  certbot:
+    profiles: [standalone-tls]
+
+  certbot-cron:
+    profiles: [standalone-tls]
+
+networks:
+  ingress:
+    name: tradejs-ingress
+    external: true

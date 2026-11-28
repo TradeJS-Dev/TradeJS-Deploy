@@ -36,7 +36,7 @@ def docker(*args):
         raise RuntimeError('Docker component observation failed') from error
 
 
-def declarations(release_bytes, compose_bytes):
+def declarations(release_bytes, compose_bytes, server_ingress=False):
     values = {}
     for line in release_bytes.decode().splitlines():
         key, separator, value = line.partition('=')
@@ -46,6 +46,8 @@ def declarations(release_bytes, compose_bytes):
     if len(values) != 6 or values.get('PROJECT_SHA') != values.get('APP_IMAGE_TAG'):
         raise ValueError('Incomplete component release declaration')
     expected = {name: (f'ghcr.io/tradejs-dev/{repo}:{values[key]}', values[key]) for name, (key, repo) in COMPONENTS.items()}
+    if server_ingress:
+        return values['PROJECT_SHA'], expected
     # These services use immutable digests declared in Deploy, not release.env.
     for name in ('certbot', 'certbot-cron'):
         block = re.search(r'^  ' + name + r':\n(.*?)(?=^  [\w-]+:|\Z)', compose_bytes.decode(), re.M | re.S)
@@ -56,9 +58,12 @@ def declarations(release_bytes, compose_bytes):
     return values['PROJECT_SHA'], expected
 
 
-def containers():
+def containers(expected_names):
     names = set(docker('container', 'ls', '--all', '--format', '{{.Names}}').splitlines())
-    return {name: json.loads(docker('inspect', '--format', CONTAINER_FORMAT, name)) if name in names else None for name in (*COMPONENTS, 'certbot', 'certbot-cron')}
+    return {
+        name: json.loads(docker('inspect', '--format', CONTAINER_FORMAT, name)) if name in names else None
+        for name in expected_names
+    }
 
 
 def component(name, expected, container):
@@ -106,13 +111,25 @@ def capture_locked(root, files, private):
         deploy_sha = files.read(private / 'deploy-source-sha').decode().strip()
         if not SHA.fullmatch(deploy_sha):
             raise ValueError('Invalid Deploy source SHA')
-        project_sha, expected = declarations(release, compose)
-        before = containers()
+        ingress_marker = root / '.server-ingress'
+        server_ingress = ingress_marker.is_file()
+        project_sha, expected = declarations(release, compose, server_ingress)
+        before = containers(expected)
         components = [component(name, definition, before[name]) for name, definition in expected.items()]
         # Reject a rollout crossing this capture rather than seal a mixed snapshot.
-        if release != (root / 'release.env').read_bytes() or compose != (root / 'docker-compose.prod.yml').read_bytes() or before != containers() or deploy_sha != files.read(private / 'deploy-source-sha').decode().strip():
+        if (release != (root / 'release.env').read_bytes()
+                or compose != (root / 'docker-compose.prod.yml').read_bytes()
+                or server_ingress != ingress_marker.is_file()
+                or before != containers(expected)
+                or deploy_sha != files.read(private / 'deploy-source-sha').decode().strip()):
             raise ValueError('Component state changed during observation')
-        report = dict(schemaVersion=1, reportType='runtime-components', userName='root', projectSha=project_sha, deploySourceSha=deploy_sha, observedAt=int(time.time() * 1000), ok=all(c['ok'] for c in components), components=components)
+        report = dict(
+            schemaVersion=2 if server_ingress else 1,
+            reportType='runtime-components', userName='root',
+            projectSha=project_sha, deploySourceSha=deploy_sha,
+            observedAt=int(time.time() * 1000),
+            ok=all(c['ok'] for c in components), components=components,
+        )
         payload = (json.dumps(report, separators=(',', ':')) + '\n').encode()
         if len(payload) > 48000:
             raise ValueError('Component snapshot exceeds MCP limit')

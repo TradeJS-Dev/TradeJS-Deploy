@@ -79,6 +79,15 @@ class ComponentsTest(unittest.TestCase):
         self.inventory['certbot-cron'].update(state='exited', running=False)
         self.assertFalse(self.capture()['ok'])
 
+    def test_server_ingress_leaves_certificate_services_out_of_the_snapshot(self):
+        (self.root / '.server-ingress').touch()
+        del self.inventory['certbot']
+        del self.inventory['certbot-cron']
+        report = self.capture()
+        self.assertTrue(report['ok'])
+        self.assertEqual(report['schemaVersion'], 2)
+        self.assertEqual([c['name'] for c in report['components']], list(module.COMPONENTS))
+
     def test_unknown_digest_or_unhealthy_container_are_explicit(self):
         with patch.object(module, 'docker', return_value=json.dumps(dict(id=self.image_id, repoDigests=[]))):
             c = module.component('agent', ('ghcr.io/tradejs-dev/tradejs-agent:' + self.sha, self.sha), self.container)
@@ -152,7 +161,7 @@ class DockerObservationTest(unittest.TestCase):
         self.addCleanup(subprocess.run, ['docker', 'container', 'rm', name], check=True, capture_output=True, timeout=15)
 
         with patch.object(module, 'COMPONENTS', {name: None}):
-            observed = module.containers()[name]
+            observed = module.containers([name])[name]
 
         self.assertEqual(observed['imageId'], image)
         self.assertEqual(observed['state'], 'created')
