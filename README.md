@@ -67,7 +67,7 @@ from source and it does not depend directly on npm package publishing.
   replay runs with a read-only Timescale role, an isolated Redis instance,
   bounded resources, and no exchange-facing transport; its image lease is
   retained until the feedback artifact is collected.
-- Redis Stack uses an immutable Deploy image based on `7.4.0-v8` with Redis server and recovery tools at `7.4.12`. It uses AOF (`everysec`) plus RDB snapshots, and is backed up with a restore drill before deploys and once per day. Backups are retained under `~/backups/redis` for 14 days by default.
+- Redis Stack uses an immutable Deploy image based on `7.4.0-v8` with Redis server and recovery tools at `7.4.12`. It uses AOF (`everysec`) plus RDB snapshots, and is backed up with a restore drill before deploys and once per day. Backups are retained under `~/backups/redis` for 7 days by default.
 - Redis explicitly uses `/data/dump.rdb`, making the named `redisdata` volume the sole persistence location. A deployment is rejected when Redis uses any other persistence path. The persistent-key count must match after Redis is recreated.
 - `TradeJS-Site` and `TradeJS-Docs` publish full-SHA images without server
   credentials. Their production rollout happens only through Deploy's typed

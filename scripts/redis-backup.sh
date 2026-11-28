@@ -2,7 +2,11 @@
 set -euo pipefail
 
 backup_root="${REDIS_BACKUP_DIR:-$HOME/backups/redis}"
-retention_days="${REDIS_BACKUP_RETENTION_DAYS:-14}"
+retention_days="${REDIS_BACKUP_RETENTION_DAYS:-7}"
+if [[ ! "$retention_days" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'Redis backup retention must be a positive number of days\n' >&2
+  exit 1
+fi
 redis_image="ghcr.io/tradejs-dev/tradejs-redis-stack:4029b3b618010c6b2ba65071ddc15ad6c246fa0e"
 redis_container="${REDIS_CONTAINER:-inv-redis}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -142,5 +146,5 @@ find "$backup_root" -type f \( \
   -name 'dump-*.rdb.sha256' -o \
   -name 'dump-*.rdb.meta.json' \
 \) \
-  -mtime "+$retention_days" -delete
+  -mmin "+$((retention_days * 24 * 60))" -delete
 echo "$backup_path"

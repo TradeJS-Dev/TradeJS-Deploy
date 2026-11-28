@@ -52,6 +52,18 @@ test('rejects removed persistence migration arguments', () => {
   assert.match(result.stderr, /Unsupported redis-backup argument/);
 });
 
+test('rejects invalid backup retention before touching Docker or backups', () => {
+  for (const retention of ['0', '-1', '7.5', 'invalid']) {
+    const result = spawnSync('bash', [backupScript], {
+      cwd: root,
+      env: { ...process.env, REDIS_BACKUP_RETENTION_DAYS: retention },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /retention must be a positive number of days/);
+  }
+});
+
 test('preserves current runtime state and removes only legacy config keys', async (t) => {
   if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
     t.skip('Docker is unavailable');
@@ -150,12 +162,27 @@ test('preserves current runtime state and removes only legacy config keys', asyn
     JSON.stringify({ deploymentId: 'production', status: 'healthy' }),
   ]);
 
+  const retentionFixtures = [
+    ['dump-expired.rdb', 7.5],
+    ['dump-expired.rdb.sha256', 7.5],
+    ['dump-expired.rdb.meta.json', 7.5],
+    ['dump-recent.rdb', 6.5],
+    ['unrelated.rdb', 30],
+  ];
+  for (const [name, ageDays] of retentionFixtures) {
+    const fixture = path.join(backupDir, name);
+    fs.writeFileSync(fixture, 'retention fixture');
+    const timestamp = new Date(Date.now() - ageDays * 86400000);
+    fs.utimesSync(fixture, timestamp, timestamp);
+  }
+
   await new Promise((resolve, reject) => {
     const child = spawn('bash', [backupScript, '--verify'], {
       cwd: root,
       env: {
         ...process.env,
         REDIS_CONTAINER: container,
+        REDIS_BACKUP_RETENTION_DAYS: '7',
         REDIS_BACKUP_DIR: backupDir,
         REDIS_RESTORE_WAIT_ATTEMPTS: '120',
       },
@@ -172,9 +199,12 @@ test('preserves current runtime state and removes only legacy config keys', asyn
       code === 0 ? resolve() : reject(new Error(output)),
     );
   });
+  for (const [name, ageDays] of retentionFixtures) {
+    assert.equal(fs.existsSync(path.join(backupDir, name)), ageDays < 7 || name === 'unrelated.rdb');
+  }
   assert.equal(
     fs.readdirSync(backupDir).filter((name) => name.endsWith('.rdb')).length,
-    1,
+    3,
   );
 
   run('docker', ['rm', '-f', container]);
